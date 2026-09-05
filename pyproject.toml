@@ -1,0 +1,43 @@
+[project]
+name = "smartapi-agentic-trading"
+version = "1.0.0"
+description = "Agentic intraday trading app for Angel One SmartAPI"
+requires-python = ">=3.9"
+dependencies = [
+    "cryptography>=41.0.0",
+    "logzero>=1.7.0",
+    "numpy>=1.26.0",
+    "pandas>=2.1.0",
+    "pyotp>=2.9.0",
+    "requests>=2.31.0",
+    "smartapi-python>=1.5.5",
+    "ta>=0.11.0",
+    "websocket-client>=1.8.0",
+]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.0.0",
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+    "yfinance>=1.2.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+# pycodestyle (E, W), Pyflakes (F), and import sorting (I) — a PEP 8 baseline.
+select = ["E", "W", "F", "I"]
+# E501 (line-too-long) is left to the formatter; it intentionally does not wrap
+# long string literals, so enforcing it here would just create noise.
+ignore = ["E501"]
