@@ -102,6 +102,10 @@ try {
       sendExit: (trade: any) => electron.ipcRenderer.invoke(channels.TELEGRAM_SEND_EXIT, { trade }),
       sendSummary: (summary: any) => electron.ipcRenderer.invoke(channels.TELEGRAM_SEND_SUMMARY, { summary }),
     },
+    swing: {
+      scan: (params?: any) => electron.ipcRenderer.invoke(channels.SWING_SCREENER_SCAN, params),
+      getLast: () => electron.ipcRenderer.invoke(channels.SWING_SCREENER_GET_LAST),
+    },
     app: {
       onPythonStatus: (callback: (data: any) => void) => {
         const listener = (_: any, data: any) => callback(data);

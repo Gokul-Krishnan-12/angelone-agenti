@@ -191,4 +191,14 @@ export function setupIpcHandlers() {
   ipcMain.handle(channels.TELEGRAM_SEND_SUMMARY, async (_, params: any) => {
     return await pythonBridge.call('telegram_send_summary', params || {});
   });
+
+  // ─── Swing Screener ───────────────────────────────────────────────
+
+  ipcMain.handle(channels.SWING_SCREENER_SCAN, async (_, params: any) => {
+    return await pythonBridge.call('swing_scan', params || {});
+  });
+
+  ipcMain.handle(channels.SWING_SCREENER_GET_LAST, async () => {
+    return await pythonBridge.call('get_last_swing_scan');
+  });
 }

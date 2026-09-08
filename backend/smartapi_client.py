@@ -977,5 +977,3 @@ class SmartApiClient:
 
 
 smart_api_client = SmartApiClient()
-# Backward-compatibility alias
-kite_client = smart_api_client

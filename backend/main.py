@@ -444,6 +444,18 @@ def handle_request(req):
             notifier.notify_session_summary(summary)
             return success({"status": "queued"})
 
+        elif method == "swing_scan":
+            from .swing_screener import swing_screener
+
+            limit = int(params.get("limit", 15)) if isinstance(params, dict) else 15
+            results = swing_screener.run_screener(limit=limit)
+            return success(results)
+
+        elif method == "get_last_swing_scan":
+            from .swing_screener import swing_screener
+
+            return success(swing_screener.get_last_results())
+
         else:
             return error(-32601, f"Method '{method}' not found")
 

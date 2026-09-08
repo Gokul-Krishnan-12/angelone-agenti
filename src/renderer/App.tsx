@@ -7,6 +7,7 @@ import AgentControl from './pages/AgentControl';
 import PaperTrade from './pages/PaperTrade';
 import Orders from './pages/Orders';
 import Watchlist from './pages/Watchlist';
+import SwingScreener from './pages/SwingScreener';
 import ActivityLog from './pages/ActivityLog';
 import Settings from './pages/Settings';
 import LoginModal from './components/LoginModal';
@@ -29,6 +30,7 @@ const App: React.FC = () => {
             <Route path="/paper-trade" element={<PaperTrade />} />
             <Route path="/orders" element={<Orders />} />
             <Route path="/watchlist" element={<Watchlist />} />
+            <Route path="/swing-screener" element={<SwingScreener />} />
             <Route path="/activity" element={<ActivityLog />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

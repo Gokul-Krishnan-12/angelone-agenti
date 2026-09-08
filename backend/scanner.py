@@ -349,7 +349,10 @@ class Scanner:
                             if "T" in last_dt
                             else last_dt.split(" ")[1][:5]
                         )
-                        ch, cm = int(time_str.split(":")[0]), int(time_str.split(":")[1])
+                        ch, cm = (
+                            int(time_str.split(":")[0]),
+                            int(time_str.split(":")[1]),
+                        )
                         c_time = datetime.time(ch, cm)
                     elif hasattr(last_dt, "time"):
                         c_time = last_dt.time()

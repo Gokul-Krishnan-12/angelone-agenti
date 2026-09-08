@@ -458,10 +458,51 @@ export interface ElectronAPI {
     sendExit: (trade: any) => Promise<{ status: string }>;
     sendSummary: (summary: any) => Promise<{ status: string }>;
   };
+  swing: {
+    scan: (params?: { limit?: number }) => Promise<SwingScanResult>;
+    getLast: () => Promise<SwingScanResult | null>;
+  };
   app: {
     onPythonStatus: (callback: (data: any) => void) => () => void;
     onError: (callback: (data: any) => void) => () => void;
   };
+}
+
+// ─── Swing Screener ───────────────────────────────────────────────
+
+export type SwingStockStatus = 'IN_RANGE' | 'TRIGGERED' | 'SETTING_UP';
+
+export interface SwingStockItem {
+  tradingsymbol: string;
+  companyName: string;
+  sector: string;
+  marketCapCategory: string;
+  ltp: number;
+  changePercent: number;
+  buyPrice: number;
+  targetPrice: number;
+  stopLoss: number;
+  riskRewardRatio: number;
+  status: SwingStockStatus;
+  institutionalScore: number;
+  institutionalActivity: string;
+  cmf: number;
+  upDownVolumeRatio: number;
+  rvol: number;
+  rsi: number;
+  pattern: string;
+  fundamentalRating: string;
+  fundamentalSummary: string;
+}
+
+export interface SwingScanResult {
+  timestamp: string;
+  totalScanned: number;
+  inRangeCount: number;
+  settingUpCount: number;
+  triggeredCount: number;
+  topStocks: SwingStockItem[];
+  criteriaSummary: string;
 }
 
 declare global {

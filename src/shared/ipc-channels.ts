@@ -75,3 +75,7 @@ export const TELEGRAM_SEND_SUMMARY = 'telegram:send-summary';
 
 // ─── Dashboard ────────────────────────────────────────────────────
 export const DASHBOARD_SUMMARY = 'dashboard:summary';
+
+// ─── Swing Screener ───────────────────────────────────────────────
+export const SWING_SCREENER_SCAN = 'swing:scan';
+export const SWING_SCREENER_GET_LAST = 'swing:get-last';

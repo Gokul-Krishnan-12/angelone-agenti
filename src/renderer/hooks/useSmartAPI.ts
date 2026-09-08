@@ -119,5 +119,3 @@ export const useSmartAPI = () => {
 
   return { login, logout, placeOrder, cancelOrder, startAgent, stopAgent };
 };
-
-export const useKiteAPI = useSmartAPI;
