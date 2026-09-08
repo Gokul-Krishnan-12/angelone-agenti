@@ -14,13 +14,23 @@ class RiskManager:
     def can_trade(self) -> Tuple[bool, str]:
         config = config_manager.get_risk_config()
 
-        # Check time
+        # Check time (Indian market hours: 09:15 to 15:15 intraday cutoff)
         now = datetime.datetime.now().time()
-        no_new_trades_after = datetime.datetime.strptime(
-            config["noNewTradesAfter"], "%H:%M"
-        ).time()
-        if now >= no_new_trades_after:
-            return False, "Time is past noNewTradesAfter limit"
+        market_open = datetime.time(9, 15)
+        intraday_cutoff = datetime.time(15, 15)
+        try:
+            cfg_cutoff = datetime.datetime.strptime(
+                config.get("noNewTradesAfter", "15:00"), "%H:%M"
+            ).time()
+        except Exception:
+            cfg_cutoff = intraday_cutoff
+
+        effective_cutoff = min(cfg_cutoff, intraday_cutoff)
+        if now < market_open or now >= effective_cutoff:
+            return (
+                False,
+                f"Outside intraday trading hours (09:15 - {effective_cutoff.strftime('%H:%M')})",
+            )
 
         # Check max positions
         if self.open_positions >= config["maxSimultaneousPositions"]:

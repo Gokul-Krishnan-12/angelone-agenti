@@ -191,8 +191,8 @@ class TradingEngine:
                 confluence_score = signal.get("confluenceScore", 0)
 
                 if self.mode == "confirm":
-                    if signal["confidence"] >= 80 and confluence_score >= 2:
-                        notifier.notify_signal_approval(signal)
+                    # Signals are pushed to the desktop UI for user approval without Telegram spam
+                    pass
                 elif self.mode == "auto" and can_trade:
                     # Confluence filter applies to BOTH auto and confirm modes.
                     # Signals from the scanner already passed the gate, but we

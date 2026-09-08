@@ -337,6 +337,27 @@ class Scanner:
             if df.empty:
                 return []
 
+            # ── 15:15 Intraday Cutoff Gate ────────────────────────────
+            # Do not generate intraday entry signals from candles at or after 3:15 PM IST
+            if "date" in df.columns and len(df) > 0:
+                last_dt = df["date"].iloc[-1]
+                try:
+                    c_time = None
+                    if isinstance(last_dt, str):
+                        time_str = (
+                            last_dt.split("T")[1][:5]
+                            if "T" in last_dt
+                            else last_dt.split(" ")[1][:5]
+                        )
+                        ch, cm = int(time_str.split(":")[0]), int(time_str.split(":")[1])
+                        c_time = datetime.time(ch, cm)
+                    elif hasattr(last_dt, "time"):
+                        c_time = last_dt.time()
+                    if c_time and c_time >= datetime.time(15, 15):
+                        return []
+                except Exception:
+                    pass
+
             # ── Regime detection ───────────────────────────────────────
             from .strategies.utils import compute_regime
 

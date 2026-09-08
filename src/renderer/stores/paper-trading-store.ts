@@ -62,6 +62,24 @@ interface PaperTradingState {
   addLog: (type: PaperLogEntry['type'], message: string) => void;
 }
 
+export const isIndianMarketHours = (): boolean => {
+  const now = new Date();
+  const istString = now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+  const istDate = new Date(istString);
+  const day = istDate.getDay();
+  // 0 is Sunday, 6 is Saturday
+  if (day === 0 || day === 6) return false;
+
+  const hours = istDate.getHours();
+  const minutes = istDate.getMinutes();
+  const timeInMinutes = hours * 60 + minutes;
+
+  const marketOpen = 9 * 60 + 15; // 09:15 IST
+  const intradayCutoff = 15 * 60 + 15; // 15:15 IST (No intraday entries after 3:15 PM)
+
+  return timeInMinutes >= marketOpen && timeInMinutes <= intradayCutoff;
+};
+
 export const usePaperTradingStore = create<PaperTradingState>()(
   persist(
     (set, get) => ({
@@ -135,6 +153,15 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       executePaperTradeFromSignal: (signal: Signal) => {
         const state = get();
         if (!state.isRunning) return false;
+
+        // Gate simulated paper executions: No intraday trades before 09:15 or after 15:15 IST (Mon-Fri)
+        if (!isIndianMarketHours()) {
+          get().addLog(
+            'INFO',
+            `Intraday cutoff reached (Trading window: 09:15–15:15 IST, Mon–Fri). Skipped virtual trade for ${signal.tradingsymbol}.`
+          );
+          return false;
+        }
 
         const cleanSymbol = signal.tradingsymbol.replace('-EQ', '');
         // Check if position already open for this symbol

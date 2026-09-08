@@ -170,10 +170,16 @@ def test_telegram_rpc_handlers():
 
 def test_notify_signal_approval():
     notifier = TelegramNotifier()
+    # By default without notifyOnSignal, approval notification should not be sent
+    notifier._get_config = MagicMock(return_value={"enabled": True})
+    with patch.object(notifier, "send_telegram_message_async") as mock_send:
+        notifier.notify_signal_approval({"tradingsymbol": "TATASTEEL"})
+        assert not mock_send.called
+
+    # If explicitly enabled, it formats and sends
     notifier._get_config = MagicMock(
         return_value={"enabled": True, "notifyOnSignal": True}
     )
-
     with patch.object(notifier, "send_telegram_message_async") as mock_send:
         notifier.notify_signal_approval(
             {

@@ -187,7 +187,7 @@ class TelegramNotifier:
             confidence, confluenceScore, familiesVoting, allStrategies, riskReward
         """
         cfg = self._get_config()
-        if not cfg.get("enabled", False) or not cfg.get("notifyOnSignal", True):
+        if not cfg.get("enabled", False) or not cfg.get("notifyOnSignal", False):
             return
 
         symbol = str(signal.get("tradingsymbol", "UNKNOWN")).replace("-EQ", "")
