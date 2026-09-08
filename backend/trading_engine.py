@@ -22,6 +22,10 @@ class TradingEngine:
         self.active_trades = {}  # tradingsymbol -> { sl, target, direction, entry_price, entry_time, original_strategy }
         self._instrument_map = {}  # cached symbol -> instrument_token map
         self._last_eod_summary_date = None
+        self.dynamic_watchlist = []
+        self.screener_interval = 3600  # 1 hour periodic dynamic re-screening
+        self._last_screener_time = 0.0
+        self._last_screener_date = None
 
     def start(self, mode: str = "confirm"):
         if self.running:
@@ -142,8 +146,17 @@ class TradingEngine:
         else:
             self._notified_cannot_trade = False
 
-        # Use our AI/Algorithmic screener to dynamically find "In Play" stocks from NIFTY 50 + Custom Watchlist
-        if not hasattr(self, "dynamic_watchlist") or not self.dynamic_watchlist:
+        # Hourly Dynamic Screener: re-screen every 1 hour (or on new day) for top 35 in-play stocks
+        now_ts = time.time()
+        today_date = datetime.date.today()
+        screener_due = (
+            not getattr(self, "dynamic_watchlist", None)
+            or getattr(self, "_last_screener_date", None) != today_date
+            or (now_ts - getattr(self, "_last_screener_time", 0.0))
+            >= getattr(self, "screener_interval", 3600)
+        )
+
+        if screener_due:
             from .fno_universe import get_fno_universe
             from .screener import screener_engine
 
@@ -151,23 +164,39 @@ class TradingEngine:
             full_universe = list(set(get_fno_universe() + custom_watchlist))
 
             self._push_log(
-                f"Running dynamic momentum screener across {len(full_universe)} F&O stocks..."
+                f"Running dynamic momentum, RVOL & institutional participation screener across {len(full_universe)} F&O stocks..."
             )
-            self.dynamic_watchlist = screener_engine.generate_daily_watchlist(
-                universe=full_universe, limit=20
+            screened_stocks = screener_engine.generate_daily_watchlist(
+                universe=full_universe, limit=35
             )
+
+            # Preserve any currently open active trades so position monitoring and trailing exits are never lost
+            combined_watchlist = list(screened_stocks)
+            for sym in self.active_trades:
+                if sym not in combined_watchlist:
+                    combined_watchlist.append(sym)
+
+            self.dynamic_watchlist = combined_watchlist
+            self._last_screener_time = now_ts
+            self._last_screener_date = today_date
+
             self._push_log(
-                f"Dynamic Watchlist selected top 20 momentum F&O stocks: {', '.join(self.dynamic_watchlist)}"
+                f"Dynamic Watchlist updated: Top {len(self.dynamic_watchlist)} in-play stocks selected "
+                f"(hourly re-screen): {', '.join(self.dynamic_watchlist[:10])}..."
             )
 
         def handle_new_signal(signal):
             if signal["confidence"] >= 70:
                 self._push_signal(signal)
-                if self.mode == "auto" and can_trade:
+                confluence_score = signal.get("confluenceScore", 0)
+
+                if self.mode == "confirm":
+                    if signal["confidence"] >= 80 and confluence_score >= 2:
+                        notifier.notify_signal_approval(signal)
+                elif self.mode == "auto" and can_trade:
                     # Confluence filter applies to BOTH auto and confirm modes.
                     # Signals from the scanner already passed the gate, but we
                     # double-check here as a safety backstop.
-                    confluence_score = signal.get("confluenceScore", 0)
                     if signal["confidence"] >= 85 and confluence_score >= 2:
                         # Prevent buying the same stock if we already have an active trade for it!
                         if signal["tradingsymbol"] not in self.active_trades:

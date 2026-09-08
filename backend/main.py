@@ -324,9 +324,9 @@ def handle_request(req):
             custom_watchlist = config_manager.get_watchlist()
             full_universe = list(set(get_fno_universe() + custom_watchlist))
 
-            # Run the dynamic screener for top 20 momentum F&O stocks
+            # Run the dynamic screener for top 35 momentum & in-play F&O stocks
             top_stocks = screener_engine.generate_daily_watchlist(
-                universe=full_universe, limit=20
+                universe=full_universe, limit=35
             )
             # Scan top stocks
             signals = scanner.scan_watchlist(top_stocks)

@@ -176,5 +176,60 @@ class TelegramNotifier:
 
         self.send_telegram_message_async(message)
 
+    def notify_signal_approval(self, signal: Dict[str, Any]):
+        """
+        Send a signal approval notification to Telegram when a high-confluence trade is found.
+
+        Parameters
+        ----------
+        signal : dict with keys:
+            tradingsymbol, direction, entryPrice (or price), stopLoss, target,
+            confidence, confluenceScore, familiesVoting, allStrategies, riskReward
+        """
+        cfg = self._get_config()
+        if not cfg.get("enabled", False) or not cfg.get("notifyOnSignal", True):
+            return
+
+        symbol = str(signal.get("tradingsymbol", "UNKNOWN")).replace("-EQ", "")
+        direction = str(signal.get("direction", "BUY")).upper()
+        entry_price = float(signal.get("entryPrice") or signal.get("price") or 0.0)
+        stop_loss = float(signal.get("stopLoss") or signal.get("sl") or 0.0)
+        target = float(signal.get("target") or 0.0)
+        confidence = int(signal.get("confidence", 0) or 0)
+        confluence_score = int(signal.get("confluenceScore", 0) or 0)
+        families = signal.get("familiesVoting", [])
+        strategies = signal.get("allStrategies", [signal.get("strategy", "")])
+        rr = float(signal.get("riskReward", 0.0) or 0.0)
+
+        now_str = datetime.datetime.now().strftime("%H:%M:%S")
+        dir_icon = "🟢" if direction == "BUY" else "🔴"
+        families_str = ", ".join(families) if families else "N/A"
+        strats_str = ", ".join(filter(None, strategies)) if strategies else "N/A"
+
+        risk_pct = (
+            abs(entry_price - stop_loss) / entry_price * 100.0
+            if entry_price > 0
+            else 0.0
+        )
+        reward_pct = (
+            abs(target - entry_price) / entry_price * 100.0 if entry_price > 0 else 0.0
+        )
+
+        message = (
+            f"⚡ <b>NEW TRADING SIGNAL — APPROVAL REQUIRED</b>\n\n"
+            f"{dir_icon} <b>Stock:</b> <b>{symbol}</b> ({direction})\n"
+            f"💵 <b>Entry Price:</b> ₹{entry_price:,.2f}\n"
+            f"🛑 <b>Stop Loss:</b> ₹{stop_loss:,.2f} ({risk_pct:.1f}% risk)\n"
+            f"🎯 <b>Target:</b> ₹{target:,.2f} ({reward_pct:.1f}% reward)\n"
+            f"⚖️ <b>Risk:Reward:</b> 1 : {rr:.2f}\n\n"
+            f"🧠 <b>Confidence:</b> <code>{confidence}%</code>\n"
+            f"🔗 <b>Confluence Score:</b> {confluence_score} Families (<code>{families_str}</code>)\n"
+            f"🛠 <b>Strategies:</b> {strats_str}\n\n"
+            f"⏳ <b>Status:</b> Awaiting user confirmation in Desktop App\n"
+            f"⏱ <b>Generated At:</b> {now_str} IST"
+        )
+
+        self.send_telegram_message_async(message)
+
 
 notifier = TelegramNotifier()

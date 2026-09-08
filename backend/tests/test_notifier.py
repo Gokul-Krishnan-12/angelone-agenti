@@ -166,3 +166,35 @@ def test_telegram_rpc_handlers():
         assert res["id"] == 101
         assert res["result"]["status"] == "queued"
         assert mock_summary.called
+
+
+def test_notify_signal_approval():
+    notifier = TelegramNotifier()
+    notifier._get_config = MagicMock(
+        return_value={"enabled": True, "notifyOnSignal": True}
+    )
+
+    with patch.object(notifier, "send_telegram_message_async") as mock_send:
+        notifier.notify_signal_approval(
+            {
+                "tradingsymbol": "TATASTEEL",
+                "direction": "BUY",
+                "entryPrice": 152.40,
+                "stopLoss": 150.10,
+                "target": 156.60,
+                "confidence": 88,
+                "confluenceScore": 3,
+                "familiesVoting": ["trend", "momentum", "breakout"],
+                "allStrategies": ["keltner_breakout", "macd_cross", "psar_trend"],
+                "riskReward": 1.83,
+            }
+        )
+        assert mock_send.called
+        sent_msg = mock_send.call_args[0][0]
+        assert "NEW TRADING SIGNAL — APPROVAL REQUIRED" in sent_msg
+        assert "TATASTEEL" in sent_msg
+        assert "152.40" in sent_msg
+        assert "150.10" in sent_msg
+        assert "156.60" in sent_msg
+        assert "88%" in sent_msg
+        assert "trend, momentum, breakout" in sent_msg

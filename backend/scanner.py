@@ -118,17 +118,13 @@ def _is_market_open_phase(no_entry_mins: int) -> bool:
     return market_open <= now < no_entry_end
 
 
-def _is_entry_window() -> bool:
+def _is_entry_window(no_entry_mins: int = 15) -> bool:
     """
     Return True if current time falls inside a high-probability entry window.
 
-    Research shows that intraday strategies have substantially higher win rates
-    in two windows:
-      • 10:00 – 11:30 IST  (post-open volatility settled, strong directional moves)
-      • 13:30 – 14:30 IST  (afternoon session, European/US open influence)
-
-    Outside these windows (midday chop and end-of-day squaring off) signal
-    quality drops significantly.
+    Intraday trading windows:
+      • Morning session: post-open chaos (09:15 + no_entry_mins, e.g. 09:30) through 11:45 IST
+      • Afternoon session: 13:00 through 15:00 IST (pre-square-off)
 
     Outside market hours (backtesting / paper mode) always returns True so
     that the scanner can still generate signals during development.
@@ -141,8 +137,13 @@ def _is_entry_window() -> bool:
     if now < market_open_t or now > market_close_t:
         return True
 
-    window_1 = datetime.time(10, 0) <= now <= datetime.time(11, 30)
-    window_2 = datetime.time(13, 30) <= now <= datetime.time(14, 30)
+    start_min = 15 + max(0, no_entry_mins)
+    start_hour = 9 + (start_min // 60)
+    start_minute = start_min % 60
+    window_start = datetime.time(start_hour, start_minute)
+
+    window_1 = window_start <= now <= datetime.time(11, 45)
+    window_2 = datetime.time(13, 0) <= now <= datetime.time(15, 0)
     return window_1 or window_2
 
 
@@ -325,7 +326,7 @@ class Scanner:
                 return []
 
             # ── Time-window gate (high-probability entry windows only) ─
-            if not _is_entry_window():
+            if not _is_entry_window(no_entry_mins):
                 return []
 
             token = smart_api_client.resolve_token(symbol)
@@ -336,14 +337,10 @@ class Scanner:
             if df.empty:
                 return []
 
-            # ── Regime filter ──────────────────────────────────────────
+            # ── Regime detection ───────────────────────────────────────
             from .strategies.utils import compute_regime
 
             regime = compute_regime(df)
-            if regime == "volatile":
-                if not was_cached:
-                    time.sleep(1.0)
-                return []
 
             # ── Run all enabled strategies ─────────────────────────────
             buy_signals: List[Dict[str, Any]] = []
@@ -352,6 +349,10 @@ class Scanner:
             for strat_id, strategy in self.strategies.items():
                 cfg = strategy_config.get(strat_id, {})
                 if not cfg.get("enabled", False):
+                    continue
+                # In choppy regime (ADX < 18), skip pure trend-following strategies
+                # but allow breakout, oscillator, structure, and reversal setups to fire
+                if regime == "volatile" and _get_strategy_family(strat_id) == "trend":
                     continue
                 try:
                     strat_signals = strategy.calculate_signals(df, symbol)
