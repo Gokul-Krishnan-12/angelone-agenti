@@ -448,6 +448,26 @@ class SmartApiClient:
         self._set_cached("orders", result)
         return result
 
+    def get_trades(self) -> List[Dict[str, Any]]:
+        """Fetch trade book from SmartAPI."""
+        if not self.smart_api:
+            return []
+        try:
+            res = self.smart_api.tradeBook()
+            if (
+                not res
+                or not res.get("status")
+                or not isinstance(res.get("data"), list)
+            ):
+                return []
+            trades = []
+            for t in res["data"]:
+                trades.append(convert_keys(t))
+            return trades
+        except Exception as e:
+            logger.error("Error getting trade book: %s", e)
+            return []
+
     def resolve_token(self, tradingsymbol: str, exchange: str = "NSE") -> str:
         """Resolve a trading symbol (e.g. 'RELIANCE' or 'RELIANCE-EQ') to an Angel One token."""
         clean = tradingsymbol.replace("-EQ", "").upper()
@@ -849,6 +869,18 @@ class SmartApiClient:
 
         return result
 
+    def get_ohlc(self, instruments: List[str]) -> Dict[str, Any]:
+        """Fetch OHLC and last price for list of instruments."""
+        quotes = self.get_quote(instruments)
+        result = {}
+        for inst, q in quotes.items():
+            result[inst] = {
+                "instrument_token": q.get("instrument_token", ""),
+                "last_price": q.get("last_price", 0.0),
+                "ohlc": q.get("ohlc", {}),
+            }
+        return result
+
     def get_instruments(self, exchange: str = "NSE") -> List[Dict[str, Any]]:
         """Retrieve instrument list, using disk cache and falling back to bundled mappings."""
         if self.instruments_cache:
@@ -930,9 +962,11 @@ class SmartApiClient:
             return [i for i in normalized if i.get("exchange") == exchange]
         return normalized
 
-    def search_instruments(self, query: str) -> List[Dict[str, Any]]:
+    def search_instruments(
+        self, query: str, exchange: str = "NSE"
+    ) -> List[Dict[str, Any]]:
         query_upper = query.upper().strip()
-        instruments = self.get_instruments("NSE")
+        instruments = self.get_instruments(exchange or "NSE")
         results = [
             i
             for i in instruments

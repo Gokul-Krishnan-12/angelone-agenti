@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Signal } from '@shared/types';
+import { TELEGRAM_SEND_EXIT } from '@shared/ipc-channels';
 
 export interface PaperPosition {
   id: string;
@@ -272,6 +273,24 @@ export const usePaperTradingStore = create<PaperTradingState>()(
                 message: `🛑 STOP LOSS HIT: ${pos.tradingsymbol} hit ₹${price.toFixed(2)}. Virtual Loss: -₹${Math.abs(pnl).toFixed(2)} (${pnlPercent.toFixed(2)}%)`
               });
             }
+
+            // Trigger Telegram exit notification
+            const exitTradeData = {
+              tradingsymbol: pos.tradingsymbol,
+              direction: pos.direction,
+              entryPrice: pos.entryPrice,
+              exitPrice: price,
+              quantity: pos.quantity,
+              pnl: Math.round(pnl * 100) / 100,
+              pnlPercent: Math.round(pnlPercent * 100) / 100,
+              exitReason: targetHit ? 'TARGET' : 'STOPLOSS',
+              mode: 'Paper Trading'
+            };
+            if (window.electronAPI?.telegram?.sendExit) {
+              window.electronAPI.telegram.sendExit(exitTradeData).catch(() => {});
+            } else if (window.electronAPI?.invoke) {
+              window.electronAPI.invoke(TELEGRAM_SEND_EXIT, { trade: exitTradeData }).catch(() => {});
+            }
           } else {
             // Position stays open, update price and live MTM
             remainingPositions.push({
@@ -335,6 +354,24 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           'EXIT',
           `Manual square off: Closed ${pos.tradingsymbol} @ ₹${pos.currentPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? '+' : ''}₹${pnl.toFixed(2)} (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`
         );
+
+        // Trigger Telegram exit notification
+        const exitTradeData = {
+          tradingsymbol: pos.tradingsymbol,
+          direction: pos.direction,
+          entryPrice: pos.entryPrice,
+          exitPrice: pos.currentPrice,
+          quantity: pos.quantity,
+          pnl: Math.round(pnl * 100) / 100,
+          pnlPercent: Math.round(pnlPercent * 100) / 100,
+          exitReason: 'MANUAL',
+          mode: 'Paper Trading'
+        };
+        if (window.electronAPI?.telegram?.sendExit) {
+          window.electronAPI.telegram.sendExit(exitTradeData).catch(() => {});
+        } else if (window.electronAPI?.invoke) {
+          window.electronAPI.invoke(TELEGRAM_SEND_EXIT, { trade: exitTradeData }).catch(() => {});
+        }
       }
     }),
     {

@@ -177,4 +177,18 @@ export function setupIpcHandlers() {
   ipcMain.handle(channels.DASHBOARD_SUMMARY, async (_, params?: any) => {
     return await pythonBridge.call('dashboard_summary', params);
   });
+
+  // ─── Telegram Notifications ───────────────────────────────────────
+  
+  ipcMain.handle(channels.TELEGRAM_TEST, async (_, params: any) => {
+    return await pythonBridge.call('telegram_test', params || {});
+  });
+
+  ipcMain.handle(channels.TELEGRAM_SEND_EXIT, async (_, params: any) => {
+    return await pythonBridge.call('telegram_send_exit', params || {});
+  });
+
+  ipcMain.handle(channels.TELEGRAM_SEND_SUMMARY, async (_, params: any) => {
+    return await pythonBridge.call('telegram_send_summary', params || {});
+  });
 }

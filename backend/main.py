@@ -198,6 +198,9 @@ def handle_request(req):
             force = params.get("force", False) if isinstance(params, dict) else False
             return success(smart_api_client.get_orders(force=force))
 
+        elif method == "get_trades":
+            return success(smart_api_client.get_trades())
+
         elif method == "get_holdings":
             return success(smart_api_client.get_holdings())
 
@@ -218,7 +221,27 @@ def handle_request(req):
             return success(res)
 
         elif method == "get_historical":
-            data = smart_api_client.get_historical_data(**params)
+            token = (
+                params.get("instrument_token")
+                or params.get("instrumentToken")
+                or params.get("symbol_token")
+                or params.get("token")
+            )
+            from_date = params.get("from_date") or params.get("fromDate")
+            to_date = params.get("to_date") or params.get("toDate")
+            interval = params.get("interval", "ONE_DAY")
+            exchange = params.get("exchange", "NSE")
+            if not token or not from_date or not to_date:
+                return error(
+                    -32602, "instrument_token, from_date, and to_date are required"
+                )
+            data = smart_api_client.get_historical_data(
+                instrument_token=str(token),
+                from_date=str(from_date),
+                to_date=str(to_date),
+                interval=interval,
+                exchange=exchange,
+            )
             return success(data)
 
         elif method == "get_quote":
@@ -247,6 +270,19 @@ def handle_request(req):
             results = smart_api_client.search_instruments(query, exchange)
             return success(results)
 
+        elif method == "ticker_subscribe":
+            tokens = params.get("tokens", [])
+            ticker_manager.subscribe(tokens)
+            return success({"status": "subscribed", "tokens": tokens})
+
+        elif method == "ticker_unsubscribe":
+            tokens = params.get("tokens", [])
+            ticker_manager.unsubscribe(tokens)
+            return success({"status": "unsubscribed", "tokens": tokens})
+
+        elif method == "ticker_status":
+            return success(ticker_manager.status())
+
         elif method == "start_agent":
             mode = (
                 params.get("mode", "confirm") if isinstance(params, dict) else "confirm"
@@ -261,6 +297,10 @@ def handle_request(req):
         elif method == "agent_status":
             return success(trading_engine.status())
 
+        elif method == "agent_dismiss_signal":
+            signal_id = params.get("signalId") or params.get("signal_id", "")
+            return success({"dismissed": signal_id})
+
         elif method == "get_settings":
             return success(config_manager.config)
 
@@ -269,20 +309,55 @@ def handle_request(req):
             config_manager.save()
             return success({"status": "saved"})
 
-        elif method == "scan_now":
-            from .nifty_universe import get_nifty50_universe
+        elif method == "settings_reset":
+            config_manager.config["risk"] = config_manager.default_config["risk"].copy()
+            config_manager.config["strategies"] = config_manager.default_config[
+                "strategies"
+            ].copy()
+            config_manager.save()
+            return success(config_manager.config)
+
+        elif method in ("scan_now", "agent_scan_now"):
+            from .fno_universe import get_fno_universe
             from .screener import screener_engine
 
             custom_watchlist = config_manager.get_watchlist()
-            full_universe = list(set(get_nifty50_universe() + custom_watchlist))
+            full_universe = list(set(get_fno_universe() + custom_watchlist))
 
-            # Run the dynamic screener
+            # Run the dynamic screener for top 20 momentum F&O stocks
             top_stocks = screener_engine.generate_daily_watchlist(
-                universe=full_universe, limit=12
+                universe=full_universe, limit=20
             )
             # Scan top stocks
             signals = scanner.scan_watchlist(top_stocks)
             return success(signals)
+
+        elif method == "log_get_all":
+            return success([])
+
+        elif method == "log_clear":
+            return success({"status": "cleared"})
+
+        elif method == "watchlist_get":
+            return success(config_manager.get_watchlist())
+
+        elif method == "watchlist_add":
+            symbol = str(params.get("symbol", "")).upper().strip()
+            wl = list(config_manager.get_watchlist())
+            if symbol and symbol not in wl:
+                wl.append(symbol)
+                config_manager.config["watchlist"] = wl
+                config_manager.save()
+            return success(wl)
+
+        elif method == "watchlist_remove":
+            symbol = str(params.get("symbol", "")).upper().strip()
+            wl = list(config_manager.get_watchlist())
+            if symbol in wl:
+                wl.remove(symbol)
+                config_manager.config["watchlist"] = wl
+                config_manager.save()
+            return success(wl)
 
         elif method == "dashboard_summary":
             force = params.get("force", False) if isinstance(params, dict) else False
@@ -339,6 +414,35 @@ def handle_request(req):
         elif method == "execute_signal":
             res = trading_engine.execute_signal(params.get("signal", {}))
             return success({"executed": res})
+
+        elif method == "telegram_test":
+            from .notifier import notifier
+
+            bot_token = params.get("botToken") or params.get("bot_token")
+            chat_id = params.get("chatId") or params.get("chat_id")
+            test_msg = (
+                "✅ <b>Angel One Trading Agent Connected!</b>\n\n"
+                "Telegram notifications are successfully configured.\n"
+                "You will receive instant alerts when trades exit and daily P&L session summaries."
+            )
+            ok, msg = notifier.send_telegram_message_sync(
+                test_msg, bot_token=bot_token, chat_id=chat_id
+            )
+            return success({"success": ok, "message": msg})
+
+        elif method == "telegram_send_exit":
+            from .notifier import notifier
+
+            trade = params.get("trade", {})
+            notifier.notify_trade_exit(trade)
+            return success({"status": "queued"})
+
+        elif method == "telegram_send_summary":
+            from .notifier import notifier
+
+            summary = params.get("summary", {})
+            notifier.notify_session_summary(summary)
+            return success({"status": "queued"})
 
         else:
             return error(-32601, f"Method '{method}' not found")

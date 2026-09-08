@@ -330,11 +330,18 @@ export interface AppSettings {
   candleInterval: string; // "5minute", "15minute", etc.
   theme: 'dark' | 'light';
   notifications: {
-    soundEnabled: boolean;
-    desktopNotifications: boolean;
-    notifyOnSignal: boolean;
-    notifyOnOrder: boolean;
-    notifyOnStopLoss: boolean;
+    soundEnabled?: boolean;
+    desktopNotifications?: boolean;
+    notifyOnSignal?: boolean;
+    notifyOnOrder?: boolean;
+    notifyOnStopLoss?: boolean;
+    telegram?: {
+      enabled: boolean;
+      botToken: string;
+      chatId: string;
+      notifyOnTradeExit: boolean;
+      notifyOnSessionEnd: boolean;
+    };
   };
 }
 
@@ -445,6 +452,11 @@ export interface ElectronAPI {
   };
   dashboard: {
     summary: (params?: any) => Promise<DashboardSummary>;
+  };
+  telegram: {
+    test: (params?: any) => Promise<{ success: boolean; message: string }>;
+    sendExit: (trade: any) => Promise<{ status: string }>;
+    sendSummary: (summary: any) => Promise<{ status: string }>;
   };
   app: {
     onPythonStatus: (callback: (data: any) => void) => () => void;

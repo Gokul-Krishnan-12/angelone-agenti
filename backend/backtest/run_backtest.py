@@ -47,24 +47,96 @@ NIFTY_50_SUBSET = [
 SHORT_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
 
+def screen_top_momentum_fno(period: str = "30d", top_n: int = 20) -> list[str]:
+    """Rank F&O stocks by realized intraday range, directional velocity, and net trend."""
+    import pandas as pd
+    import yfinance as yf
+
+    from ..fno_universe import get_fno_universe
+
+    fno = get_fno_universe()
+    print(
+        f"\n[Screener] Screening {len(fno)} F&O stocks for top {top_n} high-momentum leaders..."
+    )
+    tickers = [f"{s}.NS" for s in fno]
+
+    daily_period = "30d" if period in ("30d", "60d") else period
+    try:
+        df = yf.download(
+            tickers=tickers, period=daily_period, interval="1d", progress=False
+        )
+    except Exception as e:
+        print(
+            f"[Screener] Batch fetch failed: {e}. Falling back to default F&O selection."
+        )
+        return fno[:top_n]
+
+    scores = []
+    for s in fno:
+        try:
+            sub = pd.DataFrame(
+                {
+                    "high": df["High"][f"{s}.NS"],
+                    "low": df["Low"][f"{s}.NS"],
+                    "close": df["Close"][f"{s}.NS"],
+                    "open": df["Open"][f"{s}.NS"],
+                }
+            ).dropna()
+            if len(sub) < 5:
+                continue
+            range_pct = float(((sub["high"] - sub["low"]) / sub["close"] * 100).mean())
+            body_pct = float(
+                (abs(sub["close"] - sub["open"]) / sub["open"] * 100).mean()
+            )
+            net_move = float(
+                abs(sub["close"].iloc[-1] - sub["close"].iloc[0])
+                / sub["close"].iloc[0]
+                * 100
+            )
+            score = (range_pct * 1.5) + (body_pct * 1.5) + (net_move * 0.5)
+            scores.append((s, score))
+        except Exception:
+            pass
+
+    if not scores:
+        return fno[:top_n]
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+    top_symbols = [s for s, _ in scores[:top_n]]
+    print(f"[Screener] Top {top_n} F&O momentum symbols: {', '.join(top_symbols)}")
+    return top_symbols
+
+
 def main():
     parser = argparse.ArgumentParser(description="Agentic Trading Backtest Runner")
     parser.add_argument(
         "--interval",
         choices=["5m", "15m", "1h", "1d"],
-        default="1d",
-        help="Candle interval (default: 1d)",
+        default="15m",
+        help="Candle interval (default: 15m)",
     )
     parser.add_argument(
         "--period",
-        default="6mo",
-        help="Data period: 60d, 6mo, 1y, 2y (default: 6mo)",
+        default="30d",
+        help="Data period: 30d, 60d, 6mo, 1y (default: 30d)",
+    )
+    parser.add_argument(
+        "--universe",
+        choices=["fno", "nifty50", "short"],
+        default="fno",
+        help="Stock universe to screen (default: fno)",
+    )
+    parser.add_argument(
+        "--top-momentum",
+        type=int,
+        default=20,
+        help="Number of top momentum stocks to select (default: 20)",
     )
     parser.add_argument(
         "--symbols",
         nargs="+",
         default=None,
-        help="NSE symbols to test (default: Nifty 50 subset)",
+        help="Custom NSE symbols to test (overrides universe)",
     )
     parser.add_argument(
         "--output",
@@ -83,40 +155,66 @@ def main():
         default=1.8,
         help="Minimum R:R ratio gate (default: 1.8)",
     )
+    parser.add_argument(
+        "--trailing-atr",
+        type=float,
+        default=2.0,
+        help="Trailing stop loss multiplier (default: 2.0 × ATR)",
+    )
+    parser.add_argument(
+        "--trail-after-r",
+        type=float,
+        default=1.0,
+        help="Activate trailing SL only after reaching N × R profit (default: 1.0)",
+    )
+    parser.add_argument(
+        "--min-sl-pct",
+        type=float,
+        default=1.0,
+        help="Minimum stop-loss width percent (default: 1.0%%)",
+    )
+    parser.add_argument(
+        "--no-trend-filter",
+        action="store_true",
+        help="Disable the 50-EMA trend alignment quality filter",
+    )
 
     args = parser.parse_args()
 
     # Symbol selection
     if args.symbols:
         symbols = args.symbols
-    elif args.interval in ("5m", "15m"):
-        # Short-period intraday: fewer symbols due to yfinance 5-min limits
-        symbols = SHORT_SYMBOLS
-        if args.period not in ("60d", "30d"):
-            print(
-                "[Warning] yfinance caps 5m/15m data at 60 days. "
-                "Overriding period to '60d'."
-            )
-            args.period = "60d"
+    elif args.universe == "fno":
+        symbols = screen_top_momentum_fno(period=args.period, top_n=args.top_momentum)
+    elif args.universe == "nifty50":
+        symbols = NIFTY_50_SUBSET[: args.top_momentum]
     else:
-        symbols = NIFTY_50_SUBSET
+        symbols = SHORT_SYMBOLS
 
     print("=" * 70)
-    print("  Kite Agentic Trading — Backtest Engine")
+    print("  Kite / SmartAPI Agentic Trading — Backtest Engine")
     print("=" * 70)
-    print(f"  Interval : {args.interval}")
-    print(f"  Period   : {args.period}")
+    print(f"  Interval     : {args.interval}")
+    print(f"  Period       : {args.period}")
+    print(f"  Universe     : {args.universe} (top {len(symbols)} symbols)")
     print(
-        f"  Symbols  : {len(symbols)} ({', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''})"
+        f"  Symbols      : {', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}"
     )
-    print(f"  Gate     : confluence ≥ {args.confluence}, R:R ≥ {args.min_rr}")
-    print("  Trailing SL : enabled (1.5 × ATR)")
+    print(f"  Gate         : confluence ≥ {args.confluence}, R:R ≥ {args.min_rr}")
+    print(
+        f"  Quality Gate : min SL width ≥ {args.min_sl_pct}%, 50-EMA trend filter {'OFF' if args.no_trend_filter else 'ON'}"
+    )
+    print(
+        f"  Trailing SL  : {args.trailing_atr} × ATR (after +{args.trail_after_r}R profit cushion)"
+    )
     print("=" * 70)
 
     # ── Step 1: Fetch data ─────────────────────────────────────────────
     from .data_fetcher import fetch_candles
 
-    print("\n[Step 1/3] Downloading historical data from Yahoo Finance...")
+    print(
+        f"\n[Step 1/3] Downloading historical data for {len(symbols)} symbols from Yahoo Finance..."
+    )
     symbol_dfs = {}
     for sym in symbols:
         print(f"  Fetching {sym}... ", end="", flush=True)
@@ -126,7 +224,7 @@ def main():
         else:
             symbol_dfs[sym] = df
             print(f"OK ({len(df)} bars)")
-        time.sleep(0.5)  # rate-limit yfinance
+        time.sleep(0.3)  # rate-limit yfinance
 
     if not symbol_dfs:
         print("\n[Error] No data fetched. Check internet connection.")
@@ -143,8 +241,11 @@ def main():
         min_confluence=args.confluence,
         min_rr=args.min_rr,
         capital_per_trade=10_000.0,
-        trailing_sl_multiplier=1.5,
+        trailing_sl_multiplier=args.trailing_atr,
         min_bars=60,
+        trail_after_r=args.trail_after_r,
+        trend_aligned=not args.no_trend_filter,
+        min_sl_pct=args.min_sl_pct,
     )
     trades = engine.run(symbol_dfs)
     elapsed = time.time() - t0

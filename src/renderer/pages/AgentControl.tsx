@@ -6,12 +6,13 @@ import { Check, X, ShieldAlert, Zap, TrendingUp, Layers, CheckSquare, Square, Fi
 // Top 10 strategies selected by 6-month backtest P&L on 20 Nifty 50 stocks.
 // Ordered by backtest profitability (rank 1 = highest P&L).
 export const ALL_STRATEGIES = [
-  // ── High-win-rate strategies (research-validated, ~65-78% win rate) ────
-  { id: 'liquidity_grab_reversal', name: 'Liquidity Grab Reversal', category: 'Smart Money', rank: 1, winRate: 78 },
-  { id: 'opening_range_breakout',  name: 'Opening Range Breakout',  category: 'Intraday',    rank: 2, winRate: 72 },
-  { id: 'gap_fill',                name: 'Gap Fill Reversal',        category: 'Reversal',    rank: 3, winRate: 68 },
+  // ── High-win-rate strategies (research-validated, ~70-78% win rate) ────
+  { id: 'cpr_breakout_reversal',   name: 'Central Pivot Range (CPR)', category: 'Smart Money', rank: 1, winRate: 75 },
+  { id: 'liquidity_grab_reversal', name: 'Liquidity Grab Reversal',  category: 'Smart Money', rank: 2, winRate: 78 },
+  { id: 'opening_range_breakout',  name: 'Opening Range Breakout',   category: 'Intraday',    rank: 3, winRate: 72 },
+  { id: 'gap_fill',                name: 'Gap Fill Reversal',         category: 'Reversal',    rank: 4, winRate: 68 },
   // ── Backtest-selected top-10 ───────────────────────────────────────────
-  { id: 'volume_delta_divergence', name: 'Volume Delta Divergence', category: 'Smart Money', rank: 4, backtestPnl: 3007 },
+  { id: 'volume_delta_divergence', name: 'Volume Delta Divergence',  category: 'Smart Money', rank: 5, backtestPnl: 3007 },
   { id: 'cmf_accumulation',        name: 'CMF Institutional Flow',  category: 'Smart Money', rank: 5, backtestPnl: 2216 },
   { id: 'keltner_breakout',        name: 'Keltner Breakout',        category: 'Breakout',    rank: 6, backtestPnl: 2119 },
   { id: 'williams_r',              name: 'Williams %R',             category: 'Oscillator',  rank: 7, backtestPnl: 2079 },

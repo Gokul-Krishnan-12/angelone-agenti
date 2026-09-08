@@ -24,7 +24,7 @@ Key assumptions / simplifications
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -112,10 +112,23 @@ def _apply_confluence(
     direction: str,
     min_confluence: int = 2,
     min_rr: float = 1.8,
+    df: Optional[pd.DataFrame] = None,
+    trend_aligned: bool = True,
+    min_sl_pct: float = 1.0,
 ) -> Optional[Dict]:
     dir_signals = [s for s in signals if s.get("direction") == direction]
     if not dir_signals:
         return None
+
+    # Trend alignment gate (against 50 EMA)
+    if trend_aligned and df is not None and len(df) >= 50:
+        closes = df["close"]
+        ema50 = closes.ewm(span=50, adjust=False).mean().iloc[-1]
+        curr_close = closes.iloc[-1]
+        if direction == "BUY" and curr_close < ema50:
+            return None  # avoid counter-trend buy
+        if direction == "SELL" and curr_close > ema50:
+            return None  # avoid counter-trend sell
 
     families_seen: set = set()
     for sig in dir_signals:
@@ -126,11 +139,26 @@ def _apply_confluence(
         return None
 
     best = max(dir_signals, key=lambda s: s.get("confidence", 0))
-    rr = best.get("riskReward", 0)
+    rr = float(best.get("riskReward", 0))
     if rr < min_rr:
         return None
 
     best = dict(best)
+    entry_p = float(best.get("entryPrice", best.get("price", 0.0)))
+    sl_p = float(best.get("stopLoss", best.get("sl", 0.0)))
+
+    # Safe minimum stop-loss buffer
+    if min_sl_pct > 0 and entry_p > 0 and sl_p > 0:
+        current_sl_pct = abs(entry_p - sl_p) / entry_p * 100.0
+        if current_sl_pct < min_sl_pct:
+            safe_risk = entry_p * (min_sl_pct / 100.0)
+            if direction == "BUY":
+                best["stopLoss"] = round(entry_p - safe_risk, 2)
+                best["target"] = round(entry_p + safe_risk * max(min_rr, rr), 2)
+            else:
+                best["stopLoss"] = round(entry_p + safe_risk, 2)
+                best["target"] = round(entry_p - safe_risk * max(min_rr, rr), 2)
+
     best["confluenceScore"] = len(families_seen)
     best["familiesVoting"] = sorted(families_seen)
     best["strategyNames"] = [
@@ -148,19 +176,39 @@ class BacktestEngine:
         min_confluence: int = 2,
         min_rr: float = 1.8,
         capital_per_trade: float = 10_000.0,
-        trailing_sl_multiplier: float = 1.5,
+        trailing_sl_multiplier: float = 2.0,
         min_bars: int = 60,
+        trail_after_r: float = 1.0,
+        trend_aligned: bool = True,
+        min_sl_pct: float = 1.0,
+        disabled_strategies: Optional[Set[str]] = None,
     ):
         self.min_confluence = min_confluence
         self.min_rr = min_rr
         self.capital = capital_per_trade
         self.tsl_mult = trailing_sl_multiplier
         self.min_bars = min_bars
+        self.trail_after_r = trail_after_r
+        self.trend_aligned = trend_aligned
+        self.min_sl_pct = min_sl_pct
+        self.disabled_strats = (
+            disabled_strategies
+            if disabled_strategies is not None
+            else {
+                "williams_r",
+                "cci_reversal",
+                "adx_momentum",
+                "rsi_reversal",
+                "vwap_bounce",
+            }
+        )
 
     def _run_strategies(self, df: pd.DataFrame, symbol: str) -> List[Dict]:
         """Run all strategies on df and return tagged signal list."""
         signals = []
         for strat_id, strat in ALL_STRATEGIES.items():
+            if self.disabled_strats and strat_id in self.disabled_strats:
+                continue
             try:
                 strat_signals = strat.calculate_signals(df.copy(), symbol)
                 for sig in strat_signals:
@@ -179,19 +227,28 @@ class BacktestEngine:
         ltp: float,
         direction: str,
         atr: float,
+        entry_price: float,
+        trade_risk: float,
     ):
-        """Return (new_sl, new_hwm, new_lwm). SL only ratchets favorable."""
+        """Return (new_sl, new_hwm, new_lwm). Ratchets favorably once profit threshold is reached."""
         distance = atr * self.tsl_mult
+        threshold = trade_risk * self.trail_after_r if self.trail_after_r > 0 else 0.0
+
         if direction == "BUY":
             hwm = max(hwm, ltp)
-            new_sl = round(hwm - distance, 2)
-            if new_sl > trade_sl:
-                return new_sl, hwm, lwm
+            # Only activate trailing SL once trade advances at least threshold into profit
+            if (hwm - entry_price) >= threshold:
+                new_sl = round(max(trade_sl, entry_price, hwm - distance), 2)
+                if new_sl > trade_sl:
+                    return new_sl, hwm, lwm
         else:
             lwm = min(lwm, ltp)
-            new_sl = round(lwm + distance, 2)
-            if new_sl < trade_sl:
-                return new_sl, hwm, lwm
+            # Only activate trailing SL once trade drops at least threshold into profit
+            if (entry_price - lwm) >= threshold:
+                new_sl = round(min(trade_sl, entry_price, lwm + distance), 2)
+                if new_sl < trade_sl:
+                    return new_sl, hwm, lwm
+
         return trade_sl, hwm, lwm
 
     def run_symbol(self, df: pd.DataFrame, symbol: str) -> List[BacktestTrade]:
@@ -218,7 +275,13 @@ class BacktestEngine:
             chosen = None
             for direction in ("BUY", "SELL"):
                 chosen = _apply_confluence(
-                    raw_signals, direction, self.min_confluence, self.min_rr
+                    raw_signals,
+                    direction,
+                    self.min_confluence,
+                    self.min_rr,
+                    df=window,
+                    trend_aligned=self.trend_aligned,
+                    min_sl_pct=self.min_sl_pct,
                 )
                 if chosen:
                     break
@@ -259,6 +322,8 @@ class BacktestEngine:
                     initial_sl = round(entry_price + risk, 2)
                     target = round(entry_price - risk * 2.0, 2)
 
+            trade_risk = abs(entry_price - initial_sl)
+
             # Manage trade bar-by-bar
             trade_sl = initial_sl
             hwm = entry_price
@@ -278,29 +343,36 @@ class BacktestEngine:
                 if (j - i) % 10 == 0:
                     atr = compute_atr(df.iloc[:j]) or atr
 
-                # Check exit conditions (check SL before target for realism)
+                # Check exit conditions (target takes precedence when touched)
                 if direction == "BUY":
-                    if lo <= trade_sl:
-                        exit_price = trade_sl
-                        exit_reason = "TRAILING_SL" if trade_sl > initial_sl else "SL"
-                        break
                     if hi >= target:
                         exit_price = target
                         exit_reason = "TARGET"
                         break
-                else:
-                    if hi >= trade_sl:
+                    if lo <= trade_sl:
                         exit_price = trade_sl
-                        exit_reason = "TRAILING_SL" if trade_sl < initial_sl else "SL"
+                        exit_reason = "TRAILING_SL" if trade_sl > initial_sl else "SL"
                         break
+                else:
                     if lo <= target:
                         exit_price = target
                         exit_reason = "TARGET"
                         break
+                    if hi >= trade_sl:
+                        exit_price = trade_sl
+                        exit_reason = "TRAILING_SL" if trade_sl < initial_sl else "SL"
+                        break
 
-                # Ratchet trailing SL
+                # Ratchet trailing SL with profit cushion
                 trade_sl, hwm, lwm = self._update_trailing_sl(
-                    trade_sl, hwm, lwm, close, direction, atr
+                    trade_sl,
+                    hwm,
+                    lwm,
+                    close,
+                    direction,
+                    atr,
+                    entry_price,
+                    trade_risk,
                 )
 
                 j += 1

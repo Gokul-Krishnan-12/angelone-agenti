@@ -90,6 +90,9 @@ class TickerManager:
             except Exception:
                 pass
 
+    def status(self) -> dict:
+        return {"running": self.running, "tokens": list(self.tokens)}
+
     def subscribe(self, tokens: list):
         for token in tokens:
             self.tokens.add(str(token))

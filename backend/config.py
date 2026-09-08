@@ -26,55 +26,45 @@ class ConfigManager:
                 "positionRevalWeakExitMins": 15,
                 "positionRevalBreakevenMins": 45,
                 # ── Quality filters ──────────────────────────────────
-                "minConfluenceScore": 3,  # 3 independent families required (raised from 2)
+                "minConfluenceScore": 2,  # 2 independent families required
                 "minRiskReward": 1.8,  # minimum R:R ratio for any trade
-                "noEntryFirstMins": 45,  # skip first 45 min (9:15–10:00 opening chaos)
+                "minStopLossPercent": 1.0,  # minimum 1.0% SL width to prevent noise stop-outs
+                "trendAlignmentFilter": True,  # trade only in direction of 50-period EMA
+                "noEntryFirstMins": 15,  # skip first 15 min (9:15–9:30 opening chaos)
                 # ── Trailing stop-loss ────────────────────────────
                 "trailingSlEnabled": True,  # enable ATR trailing SL
-                "trailingSlAtrMultiplier": 1.5,  # trail N × ATR behind high-water mark
+                "trailingSlAtrMultiplier": 2.0,  # trail 2.0 × ATR behind high-water mark
+                "trailingSlProfitCushionR": 1.0,  # trail only after reaching +1.0R profit
             },
             "strategies": {
-                # ── Top 10 strategies by backtest P&L (6mo, daily, 20 Nifty 50 stocks) ──
-                # Rank  Strategy                    P&L (₹)
-                #  1    volume_delta_divergence      3,007   ← new institutional strategy
-                #  2    cmf_accumulation             2,216
-                #  3    keltner_breakout             2,119
-                #  4    williams_r                   2,079
-                #  5    cci_reversal                 1,603
-                #  6    macd_cross                   1,346
-                #  7    bollinger_breakout           1,135
-                #  8    stochastic_reversal            909
-                #  9    tsi_cross                      877
-                # 10    psar_trend                     567
-                # ────────────────────────────────────────────────────────────────────────
-                "volume_delta_divergence": {"enabled": True},  # rank 1  ₹3,007
-                "cmf_accumulation": {"enabled": True},  # rank 2  ₹2,216
-                "keltner_breakout": {"enabled": True},  # rank 3  ₹2,119
-                "williams_r": {"enabled": True},  # rank 4  ₹2,079
-                "cci_reversal": {"enabled": True},  # rank 5  ₹1,603
-                "macd_cross": {"enabled": True},  # rank 6  ₹1,346
-                "bollinger_breakout": {"enabled": True},  # rank 7  ₹1,135
-                "stochastic_reversal": {"enabled": True},  # rank 8  ₹  909
-                "tsi_cross": {"enabled": True},  # rank 9  ₹  877
-                "psar_trend": {"enabled": True},  # rank 10 ₹  567
-                # ── Disabled — underperformed in 6-month backtest ───────────────────────
-                "awesome_oscillator": {"enabled": False},  # ₹525  (cut)
-                "stoc_rsi": {"enabled": False},  # ₹514  (cut)
-                "adx_momentum": {"enabled": False},  # ₹251  (cut)
-                "donchian_breakout": {"enabled": False},  # ₹172  (cut)
-                "rsi_reversal": {"enabled": False},  # ₹131  (cut)
-                "ema_crossover": {"enabled": False},  # ₹ 99  (cut)
-                "mfi_exhaustion": {"enabled": False},  # ₹ -7  (cut)
-                "order_block_fvg": {"enabled": False},  # ₹-113 (cut)
-                "institutional_absorption": {
-                    "enabled": False
-                },  # ₹  0  (no signal on daily)
-                "supertrend": {"enabled": False},  # ₹  0  (no signal on daily)
-                "vwap_bounce": {"enabled": False},  # ₹  0  (no signal on daily)
-                # ── High-win-rate reversal strategies (new) ──────────────────
-                "opening_range_breakout": {"enabled": True},  # ~65-72% win rate
-                "liquidity_grab_reversal": {"enabled": True},  # ~68-78% win rate
-                "gap_fill": {"enabled": True},  # ~65-70% win rate
+                # ── Top strategies for high-momentum F&O trading ──
+                "donchian_breakout": {"enabled": True},
+                "keltner_breakout": {"enabled": True},
+                "order_block_fvg": {"enabled": True},
+                "bollinger_breakout": {"enabled": True},
+                "institutional_absorption": {"enabled": True},
+                "psar_trend": {"enabled": True},
+                "volume_delta_divergence": {"enabled": True},
+                "tsi_cross": {"enabled": True},
+                "awesome_oscillator": {"enabled": True},
+                "ema_crossover": {"enabled": True},
+                "cmf_accumulation": {"enabled": True},
+                "macd_cross": {"enabled": True},
+                "stoc_rsi": {"enabled": True},
+                "stochastic_reversal": {"enabled": True},
+                "supertrend": {"enabled": True},
+                "mfi_exhaustion": {"enabled": True},
+                # ── Disabled — toxic counter-trend/fading oscillators with >56% SL rates ──
+                "williams_r": {"enabled": False},  # 56.8% SL rate, -₹2,446 P&L
+                "cci_reversal": {"enabled": False},  # 63.3% SL rate, -₹1,813 P&L
+                "adx_momentum": {"enabled": False},  # 62.0% SL rate, -₹291 P&L
+                "rsi_reversal": {"enabled": False},  # 57.9% SL rate, -₹228 P&L
+                "vwap_bounce": {"enabled": False},  # 88.9% SL rate, -₹172 P&L
+                # ── High-win-rate intraday structural setups ──────────────────
+                "cpr_breakout_reversal": {"enabled": True},
+                "opening_range_breakout": {"enabled": True},
+                "liquidity_grab_reversal": {"enabled": True},
+                "gap_fill": {"enabled": True},
             },
             "watchlist": [
                 "RELIANCE",
@@ -98,6 +88,16 @@ class ConfigManager:
                 "ULTRACEMCO",
                 "NESTLEIND",
             ],
+            "notifications": {
+                "telegram": {
+                    "enabled": False,
+                    "botToken": "",
+                    "chatId": "",
+                    "notifyOnTradeExit": True,
+                    "notifyOnSessionEnd": True,
+                }
+            },
+            "mode": "confirm",  # default to confirmation mode for safety
             "credentials": {
                 "apiKey": "",
                 "clientCode": "",
@@ -261,6 +261,11 @@ class ConfigManager:
 
     def get_watchlist(self):
         return self.config.get("watchlist", self.default_config["watchlist"])
+
+    def get_notifications_config(self) -> dict:
+        return self.config.get(
+            "notifications", self.default_config.get("notifications", {})
+        )
 
     def get_app_order_ids(self) -> set:
         path = self.config_dir / "app_orders.json"

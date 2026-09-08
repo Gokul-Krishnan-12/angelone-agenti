@@ -6,6 +6,7 @@ import time
 import uuid
 
 from .config import config_manager
+from .notifier import notifier
 from .risk_manager import risk_manager
 from .scanner import scanner
 from .smartapi_client import smart_api_client
@@ -20,6 +21,7 @@ class TradingEngine:
         self.interval = 60  # seconds
         self.active_trades = {}  # tradingsymbol -> { sl, target, direction, entry_price, entry_time, original_strategy }
         self._instrument_map = {}  # cached symbol -> instrument_token map
+        self._last_eod_summary_date = None
 
     def start(self, mode: str = "confirm"):
         if self.running:
@@ -87,6 +89,20 @@ class TradingEngine:
                     self.stop()
                     break
 
+                # Check EOD session summary (triggered around squareOffTime)
+                now_dt = datetime.datetime.now()
+                today_str = now_dt.strftime("%Y-%m-%d")
+                risk_cfg = config_manager.get_risk_config()
+                sq_time_str = risk_cfg.get("squareOffTime", "15:15")
+                try:
+                    sq_t = datetime.datetime.strptime(sq_time_str, "%H:%M").time()
+                except ValueError:
+                    sq_t = datetime.time(15, 15)
+
+                if now_dt.time() >= sq_t and self._last_eod_summary_date != today_str:
+                    self._send_eod_summary()
+                    self._last_eod_summary_date = today_str
+
                 # 3. Slow polling: Scan for new entry signals
                 current_time = time.time()
                 if current_time - last_scan_time >= scan_interval:
@@ -128,20 +144,20 @@ class TradingEngine:
 
         # Use our AI/Algorithmic screener to dynamically find "In Play" stocks from NIFTY 50 + Custom Watchlist
         if not hasattr(self, "dynamic_watchlist") or not self.dynamic_watchlist:
-            from .nifty_universe import get_nifty50_universe
+            from .fno_universe import get_fno_universe
             from .screener import screener_engine
 
             custom_watchlist = config_manager.get_watchlist()
-            full_universe = list(set(get_nifty50_universe() + custom_watchlist))
+            full_universe = list(set(get_fno_universe() + custom_watchlist))
 
             self._push_log(
-                f"Running algorithmic screener on NIFTY 50 + {len(custom_watchlist)} custom stocks..."
+                f"Running dynamic momentum screener across {len(full_universe)} F&O stocks..."
             )
             self.dynamic_watchlist = screener_engine.generate_daily_watchlist(
-                universe=full_universe, limit=12
+                universe=full_universe, limit=20
             )
             self._push_log(
-                f"Dynamic Watchlist selected: {', '.join(self.dynamic_watchlist)}"
+                f"Dynamic Watchlist selected top 20 momentum F&O stocks: {', '.join(self.dynamic_watchlist)}"
             )
 
         def handle_new_signal(signal):
@@ -177,40 +193,64 @@ class TradingEngine:
     def execute_signal(self, signal: dict):
         can_trade, reason = risk_manager.can_trade()
         if not can_trade:
-            self._push_log(f"Cannot execute signal {signal['id']}: {reason}")
+            self._push_log(
+                f"Cannot execute signal {signal.get('id', 'unknown')}: {reason}"
+            )
             return False
 
-        qty = risk_manager.calculate_position_size(
-            signal["entryPrice"], signal["stopLoss"]
+        tradingsymbol = signal.get("tradingsymbol", "")
+        entry_price = float(
+            signal.get("entryPrice")
+            or signal.get("entry_price")
+            or signal.get("price")
+            or 0.0
         )
+        stop_loss = float(signal.get("stopLoss") or signal.get("stop_loss") or 0.0)
+        target = float(signal.get("target") or 0.0)
+        direction = signal.get("direction", "BUY").upper()
+        exchange = signal.get("exchange", "NSE")
 
-        transaction_type = "BUY" if signal["direction"] == "BUY" else "SELL"
+        if not tradingsymbol or entry_price <= 0 or stop_loss <= 0:
+            self._push_log(
+                f"Cannot execute signal: missing tradingsymbol ({tradingsymbol}), "
+                f"entryPrice ({entry_price}), or stopLoss ({stop_loss})"
+            )
+            return False
+
+        qty = risk_manager.calculate_position_size(entry_price, stop_loss)
+        if qty <= 0:
+            self._push_log(
+                f"Position size calculated as 0 for {tradingsymbol}. Skipping trade."
+            )
+            return False
+
+        transaction_type = "BUY" if direction == "BUY" else "SELL"
 
         try:
             order_id = smart_api_client.place_order(
                 variety="NORMAL",
-                exchange=signal["exchange"],
-                tradingsymbol=signal["tradingsymbol"],
+                exchange=exchange,
+                tradingsymbol=tradingsymbol,
                 transaction_type=transaction_type,
                 quantity=qty,
                 product="INTRADAY",
                 order_type="LIMIT",
-                price=signal["entryPrice"],
+                price=entry_price,
             )
             self._push_log(
-                f"Executed {transaction_type} for {signal['tradingsymbol']}, qty {qty}, order_id {order_id}"
+                f"Executed {transaction_type} for {tradingsymbol}, qty {qty}, order_id {order_id}"
             )
-            self.active_trades[signal["tradingsymbol"]] = {
-                "sl": signal["stopLoss"],
-                "target": signal["target"],
-                "direction": signal["direction"],
-                "entry_price": signal["entryPrice"],
+            self.active_trades[tradingsymbol] = {
+                "sl": stop_loss,
+                "target": target,
+                "direction": direction,
+                "entry_price": entry_price,
                 "entry_time": datetime.datetime.now(),
                 "original_strategy": signal.get("strategy", "unknown"),
                 # ATR trailing SL support — seeded from signal indicators if present
                 "atr": signal.get("indicators", {}).get("atr", 0.0),
-                "high_water_mark": signal["entryPrice"],  # for BUY
-                "low_water_mark": signal["entryPrice"],  # for SELL
+                "high_water_mark": entry_price,  # for BUY
+                "low_water_mark": entry_price,  # for SELL
             }
             return True
         except Exception as e:
@@ -325,6 +365,44 @@ class TradingEngine:
                                 order_type="LIMIT",
                                 price=self._get_exit_limit_price(ltp, tx_type),
                             )
+
+                            # Dispatch Telegram notification
+                            try:
+                                entry_p = float(trade.get("entry_price", ltp) or ltp)
+                                qty = abs(p["quantity"])
+                                is_buy = trade.get("direction", "BUY") == "BUY"
+                                pnl = (
+                                    (ltp - entry_p) * qty
+                                    if is_buy
+                                    else (entry_p - ltp) * qty
+                                )
+                                pnl_pct = (
+                                    ((ltp - entry_p) / entry_p * 100)
+                                    * (1 if is_buy else -1)
+                                    if entry_p > 0
+                                    else 0.0
+                                )
+                                notifier.notify_trade_exit(
+                                    {
+                                        "tradingsymbol": symbol,
+                                        "direction": trade.get("direction", "BUY"),
+                                        "entryPrice": entry_p,
+                                        "exitPrice": ltp,
+                                        "quantity": qty,
+                                        "pnl": round(pnl, 2),
+                                        "pnlPercent": round(pnl_pct, 2),
+                                        "exitReason": "TARGET"
+                                        if hit_target
+                                        else "STOPLOSS",
+                                        "mode": f"Live Trading ({self.mode.capitalize()})",
+                                    }
+                                )
+                            except Exception as notif_err:
+                                self._push_log(
+                                    f"Telegram exit alert error: {notif_err}",
+                                    level="warning",
+                                )
+
                             # Let the manual closure cleanup handle removing it on the next loop
                         else:
                             # ── ATR Trailing Stop-Loss ─────────────────────────
@@ -523,6 +601,42 @@ class TradingEngine:
                         del self.active_trades[clean]
         except Exception as e:
             self._push_log(f"Error in square off: {e}")
+
+        # Send daily Telegram session summary
+        self._send_eod_summary()
+
+    def _send_eod_summary(self):
+        try:
+            positions = smart_api_client.get_positions(force=True).get("net", [])
+            trades_today = len(positions)
+            winning_trades = sum(
+                1 for p in positions if p.get("pnl", p.get("m2m", 0)) > 0
+            )
+            losing_trades = sum(
+                1 for p in positions if p.get("pnl", p.get("m2m", 0)) < 0
+            )
+            win_rate = (
+                (winning_trades / trades_today * 100) if trades_today > 0 else 0.0
+            )
+            realised_pnl = sum(p.get("realised", 0) for p in positions)
+            total_pnl = sum(p.get("pnl", p.get("m2m", 0)) for p in positions)
+
+            notifier.notify_session_summary(
+                {
+                    "totalTrades": trades_today,
+                    "winningTrades": winning_trades,
+                    "losingTrades": losing_trades,
+                    "winRate": round(win_rate, 2),
+                    "realisedPnl": round(
+                        realised_pnl or total_pnl or risk_manager.daily_pnl, 2
+                    ),
+                    "totalPnl": round(total_pnl or risk_manager.daily_pnl, 2),
+                    "mode": f"Live Trading ({self.mode.capitalize()} Mode)",
+                }
+            )
+            self._push_log("Daily Telegram session summary dispatched")
+        except Exception as e:
+            self._push_log(f"Failed to dispatch EOD summary: {e}", level="warning")
 
 
 trading_engine = TradingEngine()

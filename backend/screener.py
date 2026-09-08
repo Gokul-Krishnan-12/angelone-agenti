@@ -1,25 +1,41 @@
-import logging
-from typing import List
+from __future__ import annotations
 
-from .nifty_universe import NIFTY_50
+import logging
+from typing import List, Optional
+
+from .fno_universe import get_fno_universe
 from .smartapi_client import smart_api_client
+
+logger = logging.getLogger(__name__)
 
 
 class DynamicScreener:
     def __init__(self):
-        self.daily_watchlist = []
+        self.daily_watchlist: List[str] = []
 
     def generate_daily_watchlist(
-        self, universe: List[str] = NIFTY_50, limit: int = 10
+        self, universe: Optional[List[str]] = None, limit: int = 20
     ) -> List[str]:
         """
-        AI/Algorithmic screener that selects the best stocks to trade today based on volatility,
-        gaps, and relative volume using batched quote API calls.
-        """
-        try:
-            instruments = [f"NSE:{symbol}" for symbol in universe]
+        AI/Algorithmic screener that selects the top high-momentum F&O stocks to trade today.
 
-            quotes = smart_api_client.get_quote(instruments)
+        Evaluates intraday directional velocity, trend expansion from open, gap percentage,
+        and day's range across the F&O universe using batched market data.
+        """
+        if universe is None:
+            universe = get_fno_universe()
+
+        try:
+            # Batch instruments into chunks of 50 to respect SmartAPI payload limits
+            quotes: dict = {}
+            chunk_size = 50
+            for i in range(0, len(universe), chunk_size):
+                chunk = universe[i : i + chunk_size]
+                instruments = [f"NSE:{symbol}" for symbol in chunk]
+                batch_res = smart_api_client.get_quote(instruments)
+                if batch_res:
+                    quotes.update(batch_res)
+
             if not quotes:
                 return universe[:limit]
 
@@ -29,32 +45,53 @@ class DynamicScreener:
                 if "last_price" not in data or "ohlc" not in data:
                     continue
 
-                ltp = data["last_price"]
-                open_price = data["ohlc"]["open"]
-                prev_close = data["ohlc"]["close"]
-                volume = data.get("volume", 0)
+                ltp = float(data.get("last_price") or 0.0)
+                ohlc = data.get("ohlc", {})
+                open_price = float(ohlc.get("open") or 0.0)
+                high_price = float(ohlc.get("high") or 0.0)
+                low_price = float(ohlc.get("low") or 0.0)
+                prev_close = float(ohlc.get("close") or 0.0)
+                volume = float(data.get("volume") or 0.0)
 
-                # We need movement to trade. Avoid flat stocks.
-                if prev_close == 0 or open_price == 0:
+                # Avoid flat, unquoted, or illiquid stocks
+                if prev_close <= 0 or open_price <= 0 or ltp <= 0:
                     continue
 
-                # 1. Gap Percentage (Overnight movement)
-                gap_pct = abs((open_price - prev_close) / prev_close) * 100
+                # 1. Total intraday change from previous close (Directional momentum)
+                change_pct = abs(ltp - prev_close) / prev_close * 100.0
 
-                # 2. Intraday Movement (Open to LTP)
-                intraday_pct = abs((ltp - open_price) / open_price) * 100
+                # 2. Intraday expansion from open (Active trend velocity)
+                open_to_ltp_pct = abs(ltp - open_price) / open_price * 100.0
 
-                # Score formula: We want high intraday movement and moderate to high gaps
-                score = (intraday_pct * 2.0) + gap_pct
+                # 3. Overnight gap
+                gap_pct = abs(open_price - prev_close) / prev_close * 100.0
 
-                clean_symbol = symbol.replace("NSE:", "").replace("-EQ", "")
+                # 4. Day's range / expansion
+                range_pct = (
+                    abs(high_price - low_price) / prev_close * 100.0
+                    if high_price >= low_price
+                    else 0.0
+                )
+
+                # Composite momentum score: high intraday velocity, expansion, and range
+                score = (
+                    (change_pct * 1.5)
+                    + (open_to_ltp_pct * 1.5)
+                    + (gap_pct * 0.8)
+                    + (range_pct * 1.0)
+                )
+
+                clean_symbol = (
+                    symbol.replace("NSE:", "").replace("-EQ", "").strip().upper()
+                )
 
                 scored_stocks.append(
                     {
                         "symbol": clean_symbol,
                         "score": score,
                         "volume": volume,
-                        "intraday_pct": intraday_pct,
+                        "change_pct": change_pct,
+                        "intraday_pct": open_to_ltp_pct,
                     }
                 )
 
@@ -62,11 +99,15 @@ class DynamicScreener:
             top_stocks = [stock["symbol"] for stock in scored_stocks[:limit]]
             self.daily_watchlist = top_stocks
 
-            logging.info(f"Dynamic Screener selected top {limit} stocks: {top_stocks}")
-            return top_stocks
+            logger.info(
+                "Dynamic Screener selected top %d high-momentum F&O stocks: %s",
+                len(top_stocks),
+                top_stocks,
+            )
+            return top_stocks if top_stocks else universe[:limit]
 
         except Exception as e:
-            logging.error(f"Failed to generate dynamic watchlist: {e}")
+            logger.error("Failed to generate dynamic F&O watchlist: %s", e)
             return universe[:limit]
 
 

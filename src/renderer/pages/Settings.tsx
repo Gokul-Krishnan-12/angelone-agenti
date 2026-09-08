@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useTradingStore } from '../stores/trading-store';
-import { SETTINGS_SAVE } from '@shared/ipc-channels';
-import { Shield, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle } from 'lucide-react';
+import { SETTINGS_SAVE, TELEGRAM_TEST } from '@shared/ipc-channels';
+import { Shield, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle, Send } from 'lucide-react';
 
 const Settings: React.FC = () => {
   const { settings, setSettings } = useTradingStore();
   const [localSettings, setLocalSettings] = useState<any>(settings);
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [testTelegramStatus, setTestTelegramStatus] = useState<string>('');
+  const [isTestingTelegram, setIsTestingTelegram] = useState<boolean>(false);
 
   // Sync local state when global settings load
   useEffect(() => {
@@ -19,6 +21,50 @@ const Settings: React.FC = () => {
   if (!localSettings) {
     return <div className="p-6 text-white">Loading settings...</div>;
   }
+
+  const handleTelegramChange = (key: string, value: any) => {
+    setLocalSettings((prev: any) => ({
+      ...prev,
+      notifications: {
+        ...prev?.notifications,
+        telegram: {
+          ...prev?.notifications?.telegram,
+          [key]: value
+        }
+      }
+    }));
+  };
+
+  const handleTestTelegram = async () => {
+    const tg = localSettings.notifications?.telegram || {};
+    if (!tg.botToken || !tg.chatId) {
+      setTestTelegramStatus('Please enter both Bot Token and Chat ID.');
+      return;
+    }
+    try {
+      setIsTestingTelegram(true);
+      setTestTelegramStatus('Sending test message...');
+      const res = window.electronAPI?.telegram?.test
+        ? await window.electronAPI.telegram.test({
+            botToken: tg.botToken,
+            chatId: tg.chatId
+          })
+        : await window.electronAPI?.invoke(TELEGRAM_TEST, {
+            botToken: tg.botToken,
+            chatId: tg.chatId
+          });
+      if (res?.success) {
+        setTestTelegramStatus('✅ Test message delivered to Telegram!');
+      } else {
+        setTestTelegramStatus(`❌ ${res?.message || 'Failed to send'}`);
+      }
+    } catch (e: any) {
+      setTestTelegramStatus(`❌ Error: ${e.message}`);
+    } finally {
+      setIsTestingTelegram(false);
+      setTimeout(() => setTestTelegramStatus(''), 5000);
+    }
+  };
 
   const handleRiskChange = (key: string, value: any) => {
     setLocalSettings((prev: any) => {
@@ -312,6 +358,124 @@ const Settings: React.FC = () => {
                 <p className="text-xs text-surface-300 bg-surface-950/60 p-2.5 rounded-lg border border-surface-800">
                   💡 <strong>How it works:</strong> If you buy a stock at ₹1,000 with these settings, the agent will exit at <strong className="text-profit-light">₹{exampleTarget}</strong> for profit, or square off at <strong className="text-loss-light">₹{exampleSL}</strong> if price moves against you.
                 </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Telegram Notifications Section */}
+          <section className="bg-surface-800/90 backdrop-blur-sm p-6 rounded-2xl border border-surface-700/80 shadow-lg space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-400 flex items-center justify-center border border-sky-500/30">
+                  <Send size={18} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-white">Telegram Alerts</h2>
+                  <p className="text-xs text-surface-400">Receive instant trade profit/loss exit receipts and daily session summaries.</p>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  className="sr-only peer" 
+                  checked={localSettings.notifications?.telegram?.enabled ?? false}
+                  onChange={(e) => handleTelegramChange('enabled', e.target.checked)}
+                />
+                <div className="w-11 h-6 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-500"></div>
+              </label>
+            </div>
+
+            {/* Quick 60-Second Setup Guide */}
+            <div className="bg-sky-500/5 border border-sky-500/20 rounded-xl p-4 text-xs space-y-2">
+              <div className="font-semibold text-sky-300 flex items-center gap-1.5">
+                <Sparkles size={14} />
+                <span>60-Second Telegram Setup Guide</span>
+              </div>
+              <ol className="list-decimal list-inside space-y-1 text-surface-300">
+                <li>Search <strong>@BotFather</strong> on Telegram and send <code>/newbot</code> to get your <strong>Bot Token</strong>.</li>
+                <li>Search <strong>@userinfobot</strong> on Telegram to copy your personal <strong>Chat ID</strong>.</li>
+                <li>Open a chat with your newly created bot and click <strong>/start</strong> so it has permission to message you.</li>
+              </ol>
+            </div>
+
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-5 ${!(localSettings.notifications?.telegram?.enabled ?? false) ? 'opacity-50 pointer-events-none' : ''}`}>
+              {/* Bot Token */}
+              <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
+                <label className="block text-surface-300 text-xs font-semibold">Telegram Bot Token</label>
+                <input 
+                  type="password" 
+                  value={localSettings.notifications?.telegram?.botToken || ''} 
+                  onChange={(e) => handleTelegramChange('botToken', e.target.value)}
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono text-xs focus:border-sky-400 outline-none transition-colors" 
+                  placeholder="e.g. 7123456789:AAFxxx..."
+                />
+                <p className="text-[11px] text-surface-500">
+                  HTTP API access token generated by @BotFather.
+                </p>
+              </div>
+
+              {/* Chat ID */}
+              <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
+                <label className="block text-surface-300 text-xs font-semibold">Your Chat ID</label>
+                <input 
+                  type="text" 
+                  value={localSettings.notifications?.telegram?.chatId || ''} 
+                  onChange={(e) => handleTelegramChange('chatId', e.target.value)}
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono text-xs focus:border-sky-400 outline-none transition-colors" 
+                  placeholder="e.g. 987654321"
+                />
+                <p className="text-[11px] text-surface-500">
+                  Your numeric user ID obtained from @userinfobot.
+                </p>
+              </div>
+
+              {/* Alert Preferences */}
+              <div className="md:col-span-2 bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-3">
+                <span className="text-xs font-semibold text-surface-300 block">Notification Events</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2.5 text-xs text-surface-300 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={localSettings.notifications?.telegram?.notifyOnTradeExit ?? true}
+                      onChange={(e) => handleTelegramChange('notifyOnTradeExit', e.target.checked)}
+                      className="rounded border-surface-700 text-sky-500 focus:ring-0 w-4 h-4 bg-surface-900 cursor-pointer"
+                    />
+                    <span>Notify on Trade Exit (Target / Stop Loss Hit)</span>
+                  </label>
+                  <label className="flex items-center gap-2.5 text-xs text-surface-300 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={localSettings.notifications?.telegram?.notifyOnSessionEnd ?? true}
+                      onChange={(e) => handleTelegramChange('notifyOnSessionEnd', e.target.checked)}
+                      className="rounded border-surface-700 text-sky-500 focus:ring-0 w-4 h-4 bg-surface-900 cursor-pointer"
+                    />
+                    <span>Notify on Session End (Total Daily P&L)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Test Message Button */}
+              <div className="md:col-span-2 flex items-center justify-between pt-2">
+                <div className="text-xs font-semibold">
+                  {testTelegramStatus && (
+                    <span className={testTelegramStatus.includes('✅') ? 'text-profit-light' : 'text-loss-light'}>
+                      {testTelegramStatus}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTestTelegram}
+                  disabled={isTestingTelegram || !localSettings.notifications?.telegram?.botToken || !localSettings.notifications?.telegram?.chatId}
+                  className="flex items-center gap-2 px-4 py-2 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 rounded-xl text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {isTestingTelegram ? (
+                    <div className="w-3.5 h-3.5 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Send size={13} />
+                  )}
+                  <span>Send Test Message</span>
+                </button>
               </div>
             </div>
           </section>

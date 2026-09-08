@@ -49,6 +49,7 @@ from .strategies.awesome_oscillator import AwesomeOscillatorStrategy
 from .strategies.bollinger_breakout import BollingerBreakoutStrategy
 from .strategies.cci_reversal import CCIReversalStrategy
 from .strategies.cmf_accumulation import CMFAccumulationStrategy
+from .strategies.cpr_breakout_reversal import CPRBreakoutReversalStrategy
 from .strategies.donchian_breakout import DonchianBreakoutStrategy
 from .strategies.ema_crossover import EMACrossoverStrategy
 from .strategies.gap_fill import GapFillStrategy
@@ -91,6 +92,7 @@ STRATEGY_FAMILIES: Dict[str, Set[str]] = {
         "institutional_absorption",
         "order_block_fvg",
         "volume_delta_divergence",
+        "cpr_breakout_reversal",
     },
     # High-win-rate reversal strategies form their own family
     "reversal": {"liquidity_grab_reversal", "gap_fill"},
@@ -175,6 +177,7 @@ class Scanner:
             "opening_range_breakout": OpeningRangeBreakoutStrategy(),
             "liquidity_grab_reversal": LiquidityGrabReversalStrategy(),
             "gap_fill": GapFillStrategy(),
+            "cpr_breakout_reversal": CPRBreakoutReversalStrategy(),
         }
         self.candle_cache: Dict[Any, pd.DataFrame] = {}
         self.last_cache_time: Dict[Any, datetime.datetime] = {}
@@ -231,32 +234,64 @@ class Scanner:
         dir_signals: List[Dict[str, Any]],
         min_confluence: int,
         min_rr: float,
+        df: Optional[pd.DataFrame] = None,
+        min_sl_pct: float = 1.0,
+        trend_aligned: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
-        Apply the confluence and R:R gate to a group of same-direction signals.
+        Apply the confluence, R:R, and quality gates to a group of same-direction signals.
 
         Returns the highest-confidence signal enriched with confluence metadata
         if the group passes, or None if it fails.
         """
-        # Compute distinct family votes (oscillator = 1 regardless of count)
+        if not dir_signals:
+            return None
+
+        # ── 1. Trend Alignment Gate (against 50 EMA) ───────────────────
+        direction = dir_signals[0].get("direction", "BUY")
+        if trend_aligned and df is not None and len(df) >= 50:
+            closes = df["close"]
+            ema50 = closes.ewm(span=50, adjust=False).mean().iloc[-1]
+            curr_close = closes.iloc[-1]
+            if direction == "BUY" and curr_close < ema50:
+                return None  # reject counter-trend longs below 50 EMA
+            if direction == "SELL" and curr_close > ema50:
+                return None  # reject counter-trend shorts above 50 EMA
+
+        # ── 2. Confluence Score Gate ──────────────────────────────────
         families_seen: Set[str] = set()
         for sig in dir_signals:
             strat_id = sig.get("_strategy_id", "")
             families_seen.add(_get_strategy_family(strat_id))
 
         confluence_score = len(families_seen)
-
         if confluence_score < min_confluence:
             return None
 
         # Take the signal with the highest confidence
         best = max(dir_signals, key=lambda s: s.get("confidence", 0))
-        rr = best.get("riskReward", 0)
+        rr = float(best.get("riskReward", 0.0))
         if rr < min_rr:
             return None
 
-        # Enrich the chosen signal with confluence metadata
+        # ── 3. Minimum Stop-Loss Buffer Gate (noise protection) ────────
         best = dict(best)
+        entry_p = float(best.get("entryPrice", best.get("price", 0.0)))
+        sl_p = float(best.get("stopLoss", best.get("sl", 0.0)))
+
+        if min_sl_pct > 0 and entry_p > 0 and sl_p > 0:
+            current_sl_pct = abs(entry_p - sl_p) / entry_p * 100.0
+            if current_sl_pct < min_sl_pct:
+                # Widen tight SL to minimum safe buffer to prevent noise stop-outs
+                safe_risk = entry_p * (min_sl_pct / 100.0)
+                if direction == "BUY":
+                    best["stopLoss"] = round(entry_p - safe_risk, 2)
+                    best["target"] = round(entry_p + safe_risk * max(min_rr, rr), 2)
+                else:
+                    best["stopLoss"] = round(entry_p + safe_risk, 2)
+                    best["target"] = round(entry_p - safe_risk * max(min_rr, rr), 2)
+
+        # Enrich the chosen signal with confluence metadata
         best["confluenceScore"] = confluence_score
         best["familiesVoting"] = sorted(families_seen)
         best["strategyCount"] = len(dir_signals)
@@ -274,7 +309,6 @@ class Scanner:
     def scan_watchlist(
         self, symbols: List[str], on_signal=None
     ) -> List[Dict[str, Any]]:
-        import concurrent.futures
 
         all_signals: List[Dict[str, Any]] = []
         strategy_config = config_manager.get_strategy_config()
@@ -282,6 +316,8 @@ class Scanner:
         min_confluence = int(risk_config.get("minConfluenceScore", 2))
         min_rr = float(risk_config.get("minRiskReward", 1.8))
         no_entry_mins = int(risk_config.get("noEntryFirstMins", 15))
+        min_sl_pct = float(risk_config.get("minStopLossPercent", 1.0))
+        trend_aligned = bool(risk_config.get("trendAlignmentFilter", True))
 
         def process_symbol(symbol: str) -> List[Dict[str, Any]]:
             # ── Market hours gate (first N minutes) ───────────────────
@@ -333,33 +369,36 @@ class Scanner:
             if not was_cached:
                 time.sleep(1.0)
 
-            # ── Confluence gate ────────────────────────────────────────
+            # ── Confluence & Quality gate ──────────────────────────────
             validated: List[Dict[str, Any]] = []
             for dir_signals in (buy_signals, sell_signals):
                 if not dir_signals:
                     continue
                 validated_sig = self._apply_confluence_gate(
-                    dir_signals, min_confluence, min_rr
+                    dir_signals,
+                    min_confluence,
+                    min_rr,
+                    df=df,
+                    min_sl_pct=min_sl_pct,
+                    trend_aligned=trend_aligned,
                 )
                 if validated_sig is not None:
                     validated.append(validated_sig)
 
             return validated
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [executor.submit(process_symbol, symbol) for symbol in symbols]
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    signals = future.result()
-                    if signals:
-                        if on_signal:
-                            for sig in signals:
-                                on_signal(sig)
-                        all_signals.extend(signals)
-                except Exception as e:
-                    import sys
+        for symbol in symbols:
+            try:
+                signals = process_symbol(symbol)
+                if signals:
+                    if on_signal:
+                        for sig in signals:
+                            on_signal(sig)
+                    all_signals.extend(signals)
+            except Exception as e:
+                import sys
 
-                    print(f"Error in parallel processing: {e}", file=sys.stderr)
+                print(f"Error processing {symbol}: {e}", file=sys.stderr)
 
         all_signals.sort(
             key=lambda x: x.get("confluenceScore", 0) * 100 + x.get("confidence", 0),

@@ -1,6 +1,6 @@
 # Backtest Report
 
-**Symbols tested:** RELIANCE, TCS, HDFCBANK, INFY, ICICIBANK  
+**Symbols tested:** ATHERENERG, PAYTM, MCX, MOTILALOFS, IDEA, DIVISLAB, SOLARINDS, APLAPOLLO, KAYNES, SAIL, ADANIENSOL, BOSCHLTD, GODREJCP, COFORGE, HINDZINC, COLPAL, POLICYBZR, GLENMARK, JUBLFOOD, GODREJPROP  
 **Period:** 60d  |  **Interval:** 15m  
 **Strategies:** 21 (with 2-family confluence gate, min R:R 1.8)  
 **ATR Trailing SL:** enabled (1.5 × ATR)  
@@ -11,19 +11,19 @@
 
 | Metric | Value |
 |--------|-------|
-| Total Trades | **496** |
-| Win Rate | **44.2%** |
-| Profit Factor | **1.53** |
-| Total P&L | **₹4,826** (on ₹10,000/trade) |
-| Expectancy (per trade) | ₹10 |
-| Avg Win | +0.69% |
-| Avg Loss | -0.35% |
-| Avg R:R Achieved | 0.87 |
-| Median R:R Achieved | 0.69 |
-| Max Drawdown | ₹434 |
-| Sharpe Ratio | 0.15 |
-| Avg Bars Held | 7.6 |
-| Trailing SL Exits | 328 (66% of trades) |
+| Total Trades | **886** |
+| Win Rate | **45.8%** |
+| Profit Factor | **1.17** |
+| Total P&L | **₹11,226** (on ₹10,000/trade) |
+| Expectancy (per trade) | ₹13 |
+| Avg Win | +1.65% |
+| Avg Loss | -1.18% |
+| Avg R:R Achieved | 1.40 |
+| Median R:R Achieved | 1.00 |
+| Max Drawdown | ₹3,467 |
+| Sharpe Ratio | 0.07 |
+| Avg Bars Held | 22.0 |
+| Trailing SL Exits | 226 (26% of trades) |
 
 ---
 
@@ -31,18 +31,18 @@
 
 | Exit Reason | Count | % |
 |-------------|-------|---|
-| TRAILING_SL | 328 | 66% |
-| SL | 107 | 22% |
-| TARGET | 59 | 12% |
-| EOD | 2 | 0% |
+| SL | 475 | 54% |
+| TRAILING_SL | 226 | 26% |
+| TARGET | 167 | 19% |
+| EOD | 18 | 2% |
 
 ---
 
 ## Best & Worst Trades
 
-**Best:** HDFCBANK SELL  Entry ₹782.1 → Exit ₹753.63  P&L **+3.64%**  Exit: TRAILING_SL
+**Best:** PAYTM BUY  Entry ₹1421.8 → Exit ₹1559.98  P&L **+9.72%**  Exit: TARGET
 
-**Worst:** HDFCBANK BUY  Entry ₹806.05 → Exit ₹794.96  P&L **-1.38%**  Exit: SL
+**Worst:** ATHERENERG BUY  Entry ₹1296.0 → Exit ₹1233.45  P&L **-4.83%**  Exit: SL
 
 ---
 
@@ -50,11 +50,26 @@
 
 | Symbol | Trades | Win Rate | P&L (₹) |
 |--------|--------|----------|---------|
-| TCS | 100 | 46% | ₹2,185 |
-| INFY | 101 | 44% | ₹1,028 |
-| HDFCBANK | 95 | 44% | ₹748 |
-| RELIANCE | 100 | 43% | ₹583 |
-| ICICIBANK | 100 | 44% | ₹282 |
+| BOSCHLTD | 42 | 45% | ₹2,941 |
+| MCX | 46 | 61% | ₹2,471 |
+| PAYTM | 47 | 49% | ₹2,384 |
+| ATHERENERG | 45 | 51% | ₹1,887 |
+| KAYNES | 55 | 51% | ₹1,646 |
+| COFORGE | 49 | 49% | ₹1,050 |
+| DIVISLAB | 35 | 63% | ₹1,026 |
+| JUBLFOOD | 44 | 52% | ₹846 |
+| SAIL | 58 | 47% | ₹747 |
+| COLPAL | 40 | 48% | ₹324 |
+| HINDZINC | 37 | 49% | ₹211 |
+| POLICYBZR | 37 | 54% | ₹188 |
+| GODREJCP | 40 | 50% | ₹95 |
+| MOTILALOFS | 46 | 37% | ₹52 |
+| APLAPOLLO | 34 | 41% | ₹-37 |
+| IDEA | 43 | 42% | ₹-452 |
+| ADANIENSOL | 42 | 21% | ₹-618 |
+| GODREJPROP | 44 | 39% | ₹-684 |
+| GLENMARK | 45 | 38% | ₹-1,353 |
+| SOLARINDS | 57 | 35% | ₹-1,497 |
 
 ---
 
@@ -62,13 +77,12 @@
 
 | Family | Trades Involved | P&L (₹) |
 |--------|-----------------|---------|
-| oscillator | 265 | ₹3,890 |
-| breakout | 290 | ₹3,215 |
-| structure | 143 | ₹2,696 |
-| trend | 238 | ₹2,640 |
-| momentum | 206 | ₹2,222 |
-| intraday | 19 | ₹-37 |
-| volume | 84 | ₹-128 |
+| breakout | 748 | ₹12,221 |
+| trend | 304 | ₹9,033 |
+| structure | 279 | ₹3,957 |
+| oscillator | 303 | ₹3,338 |
+| volume | 244 | ₹1,966 |
+| momentum | 380 | ₹1,333 |
 
 ---
 
@@ -76,27 +90,22 @@
 
 | Strategy | Wins | Losses | P&L (₹) |
 |----------|------|--------|---------|
-| Keltner Channel Breakout | 100 | 115 | ₹3,265 |
-| Stochastic RSI | 58 | 53 | ₹2,218 |
-| Williams %R | 47 | 44 | ₹2,124 |
-| Volume Delta Divergence | 40 | 44 | ₹2,029 |
-| Donchian Breakout | 79 | 97 | ₹1,905 |
-| ADX Momentum | 28 | 25 | ₹1,734 |
-| CCI Reversal | 48 | 46 | ₹1,628 |
-| Parabolic SAR Trend | 92 | 121 | ₹1,562 |
-| Institutional Absorption | 19 | 15 | ₹1,354 |
-| MACD Cross | 66 | 87 | ₹1,004 |
-| Bollinger Breakout | 30 | 39 | ₹861 |
-| TSI Crossover | 27 | 33 | ₹730 |
-| Awesome Oscillator Zero Cross | 20 | 26 | ₹574 |
-| RSI Mean Reversion | 6 | 6 | ₹448 |
-| Supertrend | 6 | 6 | ₹446 |
-| Order Block FVG | 15 | 26 | ₹221 |
-| EMA Crossover | 2 | 5 | ₹207 |
-| MFI Exhaustion | 10 | 14 | ₹158 |
-| VWAP Bounce | 9 | 10 | ₹-37 |
-| Stochastic Reversal | 6 | 5 | ₹-47 |
-| CMF Institutional Flow | 28 | 56 | ₹-128 |
+| Keltner Channel Breakout | 200 | 227 | ₹12,332 |
+| Bollinger Breakout | 130 | 119 | ₹8,417 |
+| Institutional Absorption | 42 | 28 | ₹8,301 |
+| Parabolic SAR Trend | 122 | 138 | ₹6,058 |
+| Stochastic RSI | 71 | 68 | ₹5,780 |
+| Donchian Breakout | 233 | 279 | ₹3,445 |
+| EMA Crossover | 26 | 13 | ₹2,878 |
+| Supertrend | 21 | 16 | ₹2,766 |
+| CMF Institutional Flow | 111 | 133 | ₹1,966 |
+| Order Block FVG | 62 | 78 | ₹544 |
+| TSI Crossover | 87 | 99 | ₹321 |
+| MACD Cross | 105 | 123 | ₹89 |
+| Stochastic Reversal | 2 | 3 | ₹-241 |
+| Awesome Oscillator Zero Cross | 64 | 86 | ₹-1,032 |
+| MFI Exhaustion | 7 | 14 | ₹-1,355 |
+| Volume Delta Divergence | 53 | 64 | ₹-1,705 |
 
 ---
 

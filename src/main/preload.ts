@@ -97,6 +97,11 @@ try {
     dashboard: {
       summary: (params?: any) => electron.ipcRenderer.invoke(channels.DASHBOARD_SUMMARY, params),
     },
+    telegram: {
+      test: (params?: any) => electron.ipcRenderer.invoke(channels.TELEGRAM_TEST, params),
+      sendExit: (trade: any) => electron.ipcRenderer.invoke(channels.TELEGRAM_SEND_EXIT, { trade }),
+      sendSummary: (summary: any) => electron.ipcRenderer.invoke(channels.TELEGRAM_SEND_SUMMARY, { summary }),
+    },
     app: {
       onPythonStatus: (callback: (data: any) => void) => {
         const listener = (_: any, data: any) => callback(data);

@@ -68,5 +68,10 @@ export const APP_READY = 'app:ready';
 export const APP_ERROR = 'app:error'; // Main → Renderer event
 export const APP_PYTHON_STATUS = 'app:python-status';
 
+// ─── Notifications / Telegram ─────────────────────────────────────
+export const TELEGRAM_TEST = 'telegram:test';
+export const TELEGRAM_SEND_EXIT = 'telegram:send-exit';
+export const TELEGRAM_SEND_SUMMARY = 'telegram:send-summary';
+
 // ─── Dashboard ────────────────────────────────────────────────────
 export const DASHBOARD_SUMMARY = 'dashboard:summary';
