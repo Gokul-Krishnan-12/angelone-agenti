@@ -97,6 +97,10 @@ class TradingEngine:
                 # Check EOD session summary (triggered around squareOffTime)
                 now_dt = datetime.datetime.now()
                 today_str = now_dt.strftime("%Y-%m-%d")
+                if getattr(self, "_last_day", None) != today_str:
+                    risk_manager.reset_daily_trades()
+                    self._last_day = today_str
+
                 risk_cfg = config_manager.get_risk_config()
                 sq_time_str = risk_cfg.get("squareOffTime", "15:15")
                 try:
@@ -274,6 +278,7 @@ class TradingEngine:
             self._push_log(
                 f"Executed {transaction_type} for {tradingsymbol}, qty {qty}, order_id {order_id}"
             )
+            risk_manager.increment_trade()
             self.active_trades[tradingsymbol] = {
                 "sl": stop_loss,
                 "target": target,

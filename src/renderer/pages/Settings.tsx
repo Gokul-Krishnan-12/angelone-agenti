@@ -108,6 +108,7 @@ const Settings: React.FC = () => {
         maxCapitalPerTrade: 10000,
         maxDailyLoss: 2000,
         maxSimultaneousPositions: 5,
+        maxDailyTrades: 10,
         autoSquareOff: true,
         squareOffTime: "15:15",
         defaultStopLossPercent: 1.5,
@@ -245,6 +246,21 @@ const Settings: React.FC = () => {
                 />
                 <p className="text-[11px] text-surface-500">
                   Caps concurrent open positions to prevent over-diversification and excessive margin drawdown.
+                </p>
+              </div>
+
+              {/* Max Daily Trades */}
+              <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
+                <label className="block text-surface-300 text-xs font-semibold">Max Trades Per Day (8–10)</label>
+                <input 
+                  type="number" 
+                  value={localSettings.risk?.maxDailyTrades || ''} 
+                  onChange={(e) => handleRiskChange('maxDailyTrades', e.target.value)}
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
+                  placeholder="10"
+                />
+                <p className="text-[11px] text-surface-500">
+                  Caps total executed trades per day (8–10 recommended) to eliminate overtrading and brokerage fee drain.
                 </p>
               </div>
 

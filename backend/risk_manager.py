@@ -10,6 +10,7 @@ class RiskManager:
         self.win_count = 0
         self.loss_count = 0
         self.open_positions = 0
+        self.daily_trades_count = 0
 
     def can_trade(self) -> Tuple[bool, str]:
         config = config_manager.get_risk_config()
@@ -33,17 +34,34 @@ class RiskManager:
             )
 
         # Check max positions
-        if self.open_positions >= config["maxSimultaneousPositions"]:
+        if self.open_positions >= config.get("maxSimultaneousPositions", 5):
             return (
                 False,
-                f"Max simultaneous positions ({config['maxSimultaneousPositions']}) reached",
+                f"Max simultaneous positions ({config.get('maxSimultaneousPositions', 5)}) reached",
             )
 
         # Check max daily loss
-        if self.daily_pnl <= -config["maxDailyLoss"]:
-            return False, f"Max daily loss ({-config['maxDailyLoss']}) exceeded"
+        if self.daily_pnl <= -config.get("maxDailyLoss", 2000):
+            return (
+                False,
+                f"Max daily loss ({-config.get('maxDailyLoss', 2000)}) exceeded",
+            )
+
+        # Check max daily trades (8 to 10 limit to prevent overtrading)
+        max_daily_trades = int(config.get("maxDailyTrades", 10))
+        if self.daily_trades_count >= max_daily_trades:
+            return (
+                False,
+                f"Daily trade limit ({max_daily_trades} trades) reached for today",
+            )
 
         return True, "OK"
+
+    def increment_trade(self):
+        self.daily_trades_count += 1
+
+    def reset_daily_trades(self):
+        self.daily_trades_count = 0
 
     def calculate_position_size(self, price: float, stop_loss: float) -> int:
         config = config_manager.get_risk_config()

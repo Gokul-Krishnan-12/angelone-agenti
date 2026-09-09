@@ -18,6 +18,7 @@ class ConfigManager:
                 "maxCapitalPerTrade": 10000,
                 "maxDailyLoss": 2000,
                 "maxSimultaneousPositions": 5,
+                "maxDailyTrades": 10,
                 "noNewTradesAfter": "15:00",
                 "autoSquareOff": True,
                 "squareOffTime": "15:15",
@@ -26,7 +27,7 @@ class ConfigManager:
                 "positionRevalWeakExitMins": 15,
                 "positionRevalBreakevenMins": 45,
                 # ── Quality filters ──────────────────────────────────
-                "minConfluenceScore": 2,  # 2 independent families required
+                "minConfluenceScore": 3,  # 3 independent families required for high-conviction trades
                 "minRiskReward": 1.8,  # minimum R:R ratio for any trade
                 "minStopLossPercent": 1.0,  # minimum 1.0% SL width to prevent noise stop-outs
                 "trendAlignmentFilter": True,  # trade only in direction of 50-period EMA

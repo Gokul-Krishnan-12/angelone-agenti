@@ -31,6 +31,8 @@ const PaperTrade: React.FC = () => {
   const orders = usePaperTradingStore((s) => s.orders);
   const activityLog = usePaperTradingStore((s) => s.activityLog);
   const maxCapitalPerTrade = usePaperTradingStore((s) => s.maxCapitalPerTrade);
+  const maxDailyTrades = usePaperTradingStore((s) => s.maxDailyTrades) || 10;
+  const setMaxDailyTrades = usePaperTradingStore((s) => s.setMaxDailyTrades);
   const setIsRunning = usePaperTradingStore((s) => s.setIsRunning);
   const setDummyBalance = usePaperTradingStore((s) => s.setDummyBalance);
   const setMaxCapitalPerTrade = usePaperTradingStore((s) => s.setMaxCapitalPerTrade);
@@ -47,6 +49,7 @@ const PaperTrade: React.FC = () => {
   }, [repairOrders, autoSquareOffIntraday]);
 
   const [customBalanceInput, setCustomBalanceInput] = useState<string>('');
+  const [customMaxTradesInput, setCustomMaxTradesInput] = useState<string>('');
   const [showBalanceModal, setShowBalanceModal] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'logs'>('positions');
 
@@ -78,9 +81,14 @@ const PaperTrade: React.FC = () => {
     const val = parseFloat(customBalanceInput);
     if (!isNaN(val) && val > 0) {
       setDummyBalance(val);
-      setShowBalanceModal(false);
       setCustomBalanceInput('');
     }
+    const tradesVal = parseInt(customMaxTradesInput, 10);
+    if (!isNaN(tradesVal) && tradesVal > 0) {
+      setMaxDailyTrades(tradesVal);
+      setCustomMaxTradesInput('');
+    }
+    setShowBalanceModal(false);
   };
 
   const setPresetBalance = (amount: number) => {
@@ -171,7 +179,7 @@ const PaperTrade: React.FC = () => {
         <div className="flex items-center gap-2 shrink-0">
           <div className="text-right text-[11px] hidden sm:block">
             <span className="text-surface-400 block">Today's Brokerage Saved</span>
-            <span className="font-mono font-bold text-profit-light">₹{todayBrokerageSaved.toLocaleString('en-IN')} ({todayOrders.length} trades)</span>
+            <span className="font-mono font-bold text-profit-light">₹{todayBrokerageSaved.toLocaleString('en-IN')} ({todayOrders.length}/{maxDailyTrades} trades)</span>
           </div>
           <span className="text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-1 rounded bg-surface-800 text-surface-300 border border-surface-700">
             Isolated Sandbox
@@ -595,34 +603,55 @@ const PaperTrade: React.FC = () => {
             </div>
 
             {/* Custom Input */}
-            <form onSubmit={handleUpdateBalance} className="space-y-3 pt-2">
-              <label className="block text-xs text-surface-300 font-medium">Custom Amount (₹)</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 font-mono">₹</span>
+            <form onSubmit={handleUpdateBalance} className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="block text-xs text-surface-300 font-medium">Custom Balance Amount (₹)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 font-mono">₹</span>
+                  <input
+                    type="number"
+                    min="1000"
+                    step="1000"
+                    placeholder={`Current: ₹${initialCapital.toLocaleString('en-IN')}`}
+                    value={customBalanceInput}
+                    onChange={(e) => setCustomBalanceInput(e.target.value)}
+                    className="w-full bg-surface-950 border border-surface-700 rounded-xl pl-8 pr-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-accent-light"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs text-surface-300 font-medium">Max Trades Per Day (8 to 10)</label>
+                  <span className="text-[10px] font-mono text-accent-light">Current: {maxDailyTrades} trades</span>
+                </div>
                 <input
                   type="number"
-                  min="1000"
-                  step="1000"
-                  placeholder="e.g. 75000"
-                  value={customBalanceInput}
-                  onChange={(e) => setCustomBalanceInput(e.target.value)}
-                  className="w-full bg-surface-950 border border-surface-700 rounded-xl pl-8 pr-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-accent-light"
+                  min="1"
+                  max="50"
+                  placeholder="e.g. 10 (8–10 recommended)"
+                  value={customMaxTradesInput}
+                  onChange={(e) => setCustomMaxTradesInput(e.target.value)}
+                  className="w-full bg-surface-950 border border-surface-700 rounded-xl px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-accent-light"
                 />
+                <p className="text-[10px] text-surface-500">
+                  Caps total executed trades per day (8–10 recommended) to eliminate overtrading and preserve capital.
+                </p>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowBalanceModal(false)}
-                  className="px-4 py-2 bg-surface-800 text-surface-300 rounded-xl text-xs font-medium hover:text-white"
+                  className="px-4 py-2 bg-surface-800 text-surface-300 rounded-xl text-xs font-medium hover:text-white cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-accent hover:bg-accent-light text-surface-950 font-bold rounded-xl text-xs transition-colors"
+                  className="px-5 py-2 bg-accent hover:bg-accent-light text-surface-950 font-bold rounded-xl text-xs transition-colors cursor-pointer"
                 >
-                  Apply Balance
+                  Apply Settings
                 </button>
               </div>
             </form>

@@ -221,6 +221,7 @@ export interface Signal {
   strategy: StrategyName;
   direction: SignalDirection;
   confidence: number; // 0-100
+  confluenceScore?: number;
   entryPrice: number;
   stopLoss: number;
   target: number;
@@ -249,6 +250,8 @@ export interface RiskConfig {
   maxCapitalPerTrade: number;
   maxDailyLoss: number;
   maxOpenPositions: number;
+  maxSimultaneousPositions?: number;
+  maxDailyTrades?: number;
   noNewTradesAfter: string; // "14:30" format
   autoSquareOff: boolean;
   squareOffTime: string; // "15:10" format

@@ -50,11 +50,13 @@ interface PaperTradingState {
   orders: PaperOrder[];
   activityLog: PaperLogEntry[];
   maxCapitalPerTrade: number;
+  maxDailyTrades: number;
   lastPaperSummaryDate: string | null;
 
   setDummyBalance: (amount: number) => void;
   setIsRunning: (running: boolean) => void;
   setMaxCapitalPerTrade: (amount: number) => void;
+  setMaxDailyTrades: (amount: number) => void;
   resetAccount: (newCapital?: number) => void;
   executePaperTradeFromSignal: (signal: Signal) => boolean;
   updateTickPrice: (tradingsymbol: string, price: number) => void;
@@ -103,6 +105,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         }
       ],
       maxCapitalPerTrade: 20000,
+      maxDailyTrades: 10,
 
       setDummyBalance: (amount: number) => {
         const valid = Math.max(1000, Number(amount) || 100000);
@@ -122,6 +125,10 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 
       setMaxCapitalPerTrade: (amount: number) => {
         set({ maxCapitalPerTrade: Math.max(1000, Number(amount) || 20000) });
+      },
+
+      setMaxDailyTrades: (amount: number) => {
+        set({ maxDailyTrades: Math.max(1, Math.min(50, Number(amount) || 10)) });
       },
 
       resetAccount: (newCapital?: number) => {
@@ -169,7 +176,34 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           return false;
         }
 
+        // High quality filter: require minimum confluence score of 3 independent families
+        const confluenceScore = Number(signal.confluenceScore || 1);
+        if (confluenceScore < 3) {
+          return false;
+        }
+
+        const todayIst = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+        const todayOrders = state.orders.filter(
+          (o) => o.entryTime && new Date(o.entryTime).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === todayIst
+        );
+
+        // Daily trade cap (8 to 10 trades per day to prevent overtrading and brokerage drain)
+        const maxDailyTrades = state.maxDailyTrades || 10;
+        if (todayOrders.length >= maxDailyTrades) {
+          get().addLog('INFO', `Max daily trade cap reached (${todayOrders.length}/${maxDailyTrades} trades today). Preserving capital.`);
+          return false;
+        }
+
         const cleanSymbol = signal.tradingsymbol.replace('-EQ', '');
+
+        // Anti-whipsaw cooldown: Max 1 trade per symbol per day
+        const alreadyTradedToday = todayOrders.some(
+          (o) => o.tradingsymbol === cleanSymbol || o.tradingsymbol === signal.tradingsymbol
+        );
+        if (alreadyTradedToday) {
+          return false;
+        }
+
         // Check if position already open for this symbol
         const alreadyOpen = state.positions.some(
           (p) => p.tradingsymbol === cleanSymbol || p.tradingsymbol === signal.tradingsymbol
