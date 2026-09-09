@@ -3,10 +3,12 @@ import * as path from 'path';
 import { setupIpcHandlers } from './ipc-handlers';
 import { pythonBridge } from './python-bridge';
 
-// Disable chromium sandbox for Linux unprivileged environments
+// On Linux without native DRI3 display access, software GPU compositing falls back
+// to Mesa llvmpipe, which burns all CPU cores (300%+). Disabling hardware acceleration
+// forces pure lightweight 2D Skia rendering without spawning llvmpipe threads.
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('no-sandbox');
-  app.commandLine.appendSwitch('disable-gpu-sandbox');
+  app.disableHardwareAcceleration();
 }
 
 // Ensure single instance lock
@@ -40,10 +42,23 @@ async function createWindow() {
   const isDev = !app.isPackaged;
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
+    // Only open DevTools if explicitly requested to avoid heavy CPU profiling overhead
+    if (process.env.OPEN_DEVTOOLS === 'true') {
+      mainWindow.webContents.openDevTools();
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../renderer/index.html'));
   }
+
+  // Keyboard shortcut to toggle DevTools on demand (F12 or Ctrl+Shift+I)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown') {
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        mainWindow?.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    }
+  });
 
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     console.log(`[Browser Console]: ${message} (line ${line})`);

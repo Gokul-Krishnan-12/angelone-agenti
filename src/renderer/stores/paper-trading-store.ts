@@ -27,7 +27,7 @@ export interface PaperOrder {
   quantity: number;
   entryPrice: number;
   exitPrice?: number;
-  status: 'OPEN' | 'TARGET_HIT' | 'STOPLOSS_HIT' | 'MANUAL_EXIT';
+  status: 'OPEN' | 'TARGET_HIT' | 'STOPLOSS_HIT' | 'MANUAL_EXIT' | 'AUTO_SQUARE_OFF';
   strategy: string;
   pnl?: number;
   pnlPercent?: number;
@@ -58,6 +58,7 @@ interface PaperTradingState {
   executePaperTradeFromSignal: (signal: Signal) => boolean;
   updateTickPrice: (tradingsymbol: string, price: number) => void;
   manualSquareOff: (positionId: string) => void;
+  autoSquareOffIntraday: () => boolean;
   clearOrders: () => void;
   repairOrders: () => void;
   clearLogs: () => void;
@@ -254,6 +255,9 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 
       updateTickPrice: (tradingsymbol: string, price: number) => {
         if (!tradingsymbol || price <= 0) return;
+        // Intraday cutoff: If past 3:15 PM IST, square off all open positions immediately
+        if (get().autoSquareOffIntraday()) return;
+
         const cleanSymbol = tradingsymbol.replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
         const state = get();
         if (state.positions.length === 0) return;
@@ -416,12 +420,95 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         }
       },
 
+      autoSquareOffIntraday: (): boolean => {
+        const state = get();
+        if (state.positions.length === 0) return false;
+
+        const now = new Date();
+        const istString = now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+        const istDate = new Date(istString);
+        const day = istDate.getDay();
+        // Skip weekend checks
+        if (day === 0 || day === 6) return false;
+
+        const hours = istDate.getHours();
+        const minutes = istDate.getMinutes();
+        const timeInMinutes = hours * 60 + minutes;
+
+        // NSE Intraday MIS auto square-off cutoff: 15:15 IST (3:15 PM)
+        const autoSquareOffCutoff = 15 * 60 + 15;
+        if (timeInMinutes < autoSquareOffCutoff) return false;
+
+        let balanceDelta = 0;
+        const updatedOrders = [...state.orders];
+        const logsToAdd: { type: PaperLogEntry['type']; message: string }[] = [];
+
+        for (const pos of state.positions) {
+          const isBuy = pos.direction === 'BUY';
+          const effectiveExitPrice = (pos.currentPrice && pos.currentPrice > 0) ? pos.currentPrice : pos.entryPrice;
+          const pnl = isBuy
+            ? (effectiveExitPrice - pos.entryPrice) * pos.quantity
+            : (pos.entryPrice - effectiveExitPrice) * pos.quantity;
+          const pnlPercent = ((effectiveExitPrice - pos.entryPrice) / pos.entryPrice) * 100 * (isBuy ? 1 : -1);
+
+          balanceDelta += pos.marginUsed + pnl;
+
+          const ordIdx = updatedOrders.findIndex((o) => o.tradingsymbol === pos.tradingsymbol && o.status === 'OPEN');
+          if (ordIdx >= 0) {
+            updatedOrders[ordIdx] = {
+              ...updatedOrders[ordIdx],
+              status: 'AUTO_SQUARE_OFF',
+              exitPrice: effectiveExitPrice,
+              pnl: Math.round(pnl * 100) / 100,
+              pnlPercent: Math.round(pnlPercent * 100) / 100,
+              exitTime: new Date().toISOString()
+            };
+          }
+
+          logsToAdd.push({
+            type: 'EXIT',
+            message: `⏰ 3:15 PM Intraday MIS Auto Square-Off: Closed ${pos.tradingsymbol} (${pos.direction}) @ ₹${effectiveExitPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? '+' : ''}₹${pnl.toFixed(2)} (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`
+          });
+
+          // Trigger Telegram exit notification
+          const exitTradeData = {
+            tradingsymbol: pos.tradingsymbol,
+            direction: pos.direction,
+            entryPrice: pos.entryPrice,
+            exitPrice: effectiveExitPrice,
+            quantity: pos.quantity,
+            pnl: Math.round(pnl * 100) / 100,
+            pnlPercent: Math.round(pnlPercent * 100) / 100,
+            exitReason: 'INTRADAY_AUTO_SQUARE_OFF (3:15 PM Cutoff)',
+            mode: 'Paper Trading'
+          };
+          if (window.electronAPI?.telegram?.sendExit) {
+            window.electronAPI.telegram.sendExit(exitTradeData).catch(() => {});
+          } else if (window.electronAPI?.invoke) {
+            window.electronAPI.invoke(TELEGRAM_SEND_EXIT, { trade: exitTradeData }).catch(() => {});
+          }
+        }
+
+        set({
+          dummyBalance: state.dummyBalance + balanceDelta,
+          positions: [],
+          orders: updatedOrders
+        });
+
+        for (const l of logsToAdd) {
+          get().addLog(l.type, l.message);
+        }
+
+        return true;
+      },
+
       clearOrders: () => set({ orders: [] }),
 
       repairOrders: () => {
         set((state) => ({
           orders: state.orders.map(sanitizePaperOrder)
         }));
+        get().autoSquareOffIntraday();
       }
     }),
     {
@@ -429,6 +516,9 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       onRehydrateStorage: () => (state) => {
         if (state && Array.isArray(state.orders)) {
           state.orders = state.orders.map(sanitizePaperOrder);
+        }
+        if (state && typeof state.autoSquareOffIntraday === 'function') {
+          state.autoSquareOffIntraday();
         }
       }
     }

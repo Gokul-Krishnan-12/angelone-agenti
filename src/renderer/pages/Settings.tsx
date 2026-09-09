@@ -4,7 +4,8 @@ import { SETTINGS_SAVE, TELEGRAM_TEST } from '@shared/ipc-channels';
 import { Shield, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle, Send } from 'lucide-react';
 
 const Settings: React.FC = () => {
-  const { settings, setSettings } = useTradingStore();
+  const settings = useTradingStore((s) => s.settings);
+  const setSettings = useTradingStore((s) => s.setSettings);
   const [localSettings, setLocalSettings] = useState<any>(settings);
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);

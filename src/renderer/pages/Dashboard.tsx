@@ -22,16 +22,14 @@ import {
 } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
-  const {
-    dashboard,
-    positions,
-    agentState,
-    activityLog,
-    auth,
-    setDashboard,
-    setPositions,
-    setAgentState
-  } = useTradingStore();
+  const dashboard = useTradingStore((s) => s.dashboard);
+  const positions = useTradingStore((s) => s.positions);
+  const agentState = useTradingStore((s) => s.agentState);
+  const activityLog = useTradingStore((s) => s.activityLog);
+  const auth = useTradingStore((s) => s.auth);
+  const setDashboard = useTradingStore((s) => s.setDashboard);
+  const setPositions = useTradingStore((s) => s.setPositions);
+  const setAgentState = useTradingStore((s) => s.setAgentState);
 
   const { startAgent, stopAgent } = useSmartAPI();
   const [scanning, setScanning] = useState(false);

@@ -123,6 +123,9 @@ export const useSmartAPI = () => {
     // Fallback periodic LTP poller for ALL open positions (live + paper) and active signals every 3 seconds
     let isRealtimeLtpPolling = false;
     const realtimeLtpInterval = setInterval(async () => {
+      // Periodic check for 3:15 PM intraday auto-square-off for paper trading
+      usePaperTradingStore.getState().autoSquareOffIntraday();
+
       if (isRealtimeLtpPolling) return;
       const paperPositions = usePaperTradingStore.getState().positions;
       const livePositions = useTradingStore.getState().positions.filter((p) => p.quantity !== 0);

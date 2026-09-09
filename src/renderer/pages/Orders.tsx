@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 
 const Orders: React.FC = () => {
-  const { orders, setOrders } = useTradingStore();
+  const orders = useTradingStore((s) => s.orders);
+  const setOrders = useTradingStore((s) => s.setOrders);
   const [tab, setTab] = useState<'all' | 'open' | 'completed' | 'rejected' | 'cancelled'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);

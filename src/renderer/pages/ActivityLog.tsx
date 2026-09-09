@@ -17,7 +17,8 @@ import {
 } from 'lucide-react';
 
 const ActivityLog: React.FC = () => {
-  const { activityLog, setActivityLog } = useTradingStore();
+  const activityLog = useTradingStore((s) => s.activityLog);
+  const setActivityLog = useTradingStore((s) => s.setActivityLog);
   const [filter, setFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);

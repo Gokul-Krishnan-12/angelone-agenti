@@ -24,27 +24,27 @@ import {
 } from 'lucide-react';
 
 const PaperTrade: React.FC = () => {
-  const {
-    dummyBalance,
-    initialCapital,
-    isRunning,
-    positions,
-    orders,
-    activityLog,
-    maxCapitalPerTrade,
-    setIsRunning,
-    setDummyBalance,
-    setMaxCapitalPerTrade,
-    resetAccount,
-    manualSquareOff,
-    clearLogs,
-    clearOrders,
-    repairOrders
-  } = usePaperTradingStore();
+  const dummyBalance = usePaperTradingStore((s) => s.dummyBalance);
+  const initialCapital = usePaperTradingStore((s) => s.initialCapital);
+  const isRunning = usePaperTradingStore((s) => s.isRunning);
+  const positions = usePaperTradingStore((s) => s.positions);
+  const orders = usePaperTradingStore((s) => s.orders);
+  const activityLog = usePaperTradingStore((s) => s.activityLog);
+  const maxCapitalPerTrade = usePaperTradingStore((s) => s.maxCapitalPerTrade);
+  const setIsRunning = usePaperTradingStore((s) => s.setIsRunning);
+  const setDummyBalance = usePaperTradingStore((s) => s.setDummyBalance);
+  const setMaxCapitalPerTrade = usePaperTradingStore((s) => s.setMaxCapitalPerTrade);
+  const resetAccount = usePaperTradingStore((s) => s.resetAccount);
+  const manualSquareOff = usePaperTradingStore((s) => s.manualSquareOff);
+  const clearLogs = usePaperTradingStore((s) => s.clearLogs);
+  const clearOrders = usePaperTradingStore((s) => s.clearOrders);
+  const repairOrders = usePaperTradingStore((s) => s.repairOrders);
+  const autoSquareOffIntraday = usePaperTradingStore((s) => s.autoSquareOffIntraday);
 
   useEffect(() => {
     repairOrders();
-  }, [repairOrders]);
+    autoSquareOffIntraday();
+  }, [repairOrders, autoSquareOffIntraday]);
 
   const [customBalanceInput, setCustomBalanceInput] = useState<string>('');
   const [showBalanceModal, setShowBalanceModal] = useState<boolean>(false);
@@ -61,6 +61,7 @@ const PaperTrade: React.FC = () => {
 
   const targetHitCount = closedOrders.filter((o) => o.status === 'TARGET_HIT').length;
   const slHitCount = closedOrders.filter((o) => o.status === 'STOPLOSS_HIT').length;
+  const autoSquaredOffCount = closedOrders.filter((o) => o.status === 'AUTO_SQUARE_OFF').length;
   const winRate = closedOrders.length > 0 ? (targetHitCount / closedOrders.length) * 100 : 0;
 
   const handleUpdateBalance = (e: React.FormEvent) => {
@@ -484,11 +485,13 @@ const PaperTrade: React.FC = () => {
                               ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
                               : o.status === 'STOPLOSS_HIT'
                                 ? 'bg-loss-dark/20 text-loss-light border border-loss/30'
-                                : o.status === 'OPEN'
-                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                  : 'bg-surface-700 text-surface-300'
+                                : o.status === 'AUTO_SQUARE_OFF'
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                  : o.status === 'OPEN'
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                    : 'bg-surface-700 text-surface-300'
                           }`}>
-                            {o.status.replace('_', ' ')}
+                            {o.status.replace(/_/g, ' ')}
                           </span>
                         </td>
                         <td className="px-5 py-3 font-mono font-bold text-right">
