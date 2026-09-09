@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTradingStore } from '../stores/trading-store';
 import { useSmartAPI } from '../hooks/useSmartAPI';
+import { useAutoReload } from '../hooks/useAutoReload';
 import { WatchlistItem, TransactionType } from '@shared/types';
 import { Search, X, Plus, TrendingUp, TrendingDown, RefreshCw, ShoppingCart } from 'lucide-react';
 
@@ -37,7 +38,7 @@ const Watchlist: React.FC = () => {
 
   const searchRef = useRef<HTMLDivElement>(null);
 
-  // Load watchlist on mount or fallback to settings
+  // Load watchlist with fresh quotes
   const loadWatchlist = async () => {
     try {
       setRefreshing(true);
@@ -49,7 +50,7 @@ const Watchlist: React.FC = () => {
         symbols = settings?.watchlist || ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN'];
       }
 
-      // Fetch quotes to get initial prices
+      // Fetch quotes to get fresh prices
       let quoteData: Record<string, any> = {};
       try {
         if (window.electronAPI?.market?.quote) {
@@ -91,9 +92,8 @@ const Watchlist: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    loadWatchlist();
-  }, []);
+  // Auto reload watchlist on mount, route switch, focus, and every 8s
+  const { lastSynced, isReloading, reload } = useAutoReload(loadWatchlist, { intervalMs: 8000 });
 
   // Close search dropdown on click outside
   useEffect(() => {
@@ -227,14 +227,20 @@ const Watchlist: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 w-full sm:w-auto">
-          <button
-            onClick={loadWatchlist}
-            disabled={refreshing}
-            className="p-2 rounded-lg bg-surface-800 hover:bg-surface-700 text-surface-300 hover:text-white border border-surface-700 transition-colors"
-            title="Refresh prices"
-          >
-            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-          </button>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono text-surface-400 flex items-center gap-1.5 bg-surface-900/60 px-2.5 py-1.5 rounded-lg border border-surface-800">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Live: {lastSynced}</span>
+            </span>
+            <button
+              onClick={() => reload()}
+              disabled={refreshing || isReloading}
+              className="p-2 rounded-lg bg-surface-800 hover:bg-surface-700 text-surface-300 hover:text-white border border-surface-700 transition-colors cursor-pointer"
+              title="Refresh quotes now"
+            >
+              <RefreshCw size={16} className={(refreshing || isReloading) ? 'animate-spin' : ''} />
+            </button>
+          </div>
 
           {/* Search Input with Auto-complete */}
           <div ref={searchRef} className="relative w-full sm:w-72">

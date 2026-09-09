@@ -58,6 +58,8 @@ interface PaperTradingState {
   executePaperTradeFromSignal: (signal: Signal) => boolean;
   updateTickPrice: (tradingsymbol: string, price: number) => void;
   manualSquareOff: (positionId: string) => void;
+  clearOrders: () => void;
+  repairOrders: () => void;
   clearLogs: () => void;
   addLog: (type: PaperLogEntry['type'], message: string) => void;
 }
@@ -238,6 +240,11 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           orders: [newOrder, ...state.orders]
         });
 
+        // Auto-subscribe the new paper position to live ticker stream
+        if (window.electronAPI?.ticker?.subscribe) {
+          window.electronAPI.ticker.subscribe([cleanSymbol as any]);
+        }
+
         get().addLog(
           'EXECUTE',
           `Virtual ${direction} executed: ${quantity} shares of ${cleanSymbol} @ ₹${entryPrice.toFixed(2)} [Target: ₹${target.toFixed(2)}, SL: ₹${stopLoss.toFixed(2)}] via ${signal.strategy}`
@@ -246,9 +253,10 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       },
 
       updateTickPrice: (tradingsymbol: string, price: number) => {
-        const cleanSymbol = tradingsymbol.replace('-EQ', '');
+        if (!tradingsymbol || price <= 0) return;
+        const cleanSymbol = tradingsymbol.replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
         const state = get();
-        if (price <= 0 || state.positions.length === 0) return;
+        if (state.positions.length === 0) return;
 
         let balanceDelta = 0;
         const remainingPositions: PaperPosition[] = [];
@@ -256,21 +264,28 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         const logsToAdd: { type: PaperLogEntry['type']; message: string }[] = [];
 
         for (const pos of state.positions) {
-          if (pos.tradingsymbol !== cleanSymbol && pos.tradingsymbol !== tradingsymbol) {
+          const posClean = pos.tradingsymbol.replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
+          if (posClean !== cleanSymbol) {
             remainingPositions.push(pos);
             continue;
           }
 
+          let effectivePrice = price;
+          // Defensive guard against paise anomaly (e.g. tick in paise ~100x entry price)
+          if (pos.entryPrice > 0 && effectivePrice > pos.entryPrice * 20) {
+            effectivePrice = Math.round((effectivePrice / 100) * 100) / 100;
+          }
+
           const isBuy = pos.direction === 'BUY';
           const pnl = isBuy
-            ? (price - pos.entryPrice) * pos.quantity
-            : (pos.entryPrice - price) * pos.quantity;
-          const pnlPercent = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isBuy ? 1 : -1);
+            ? (effectivePrice - pos.entryPrice) * pos.quantity
+            : (pos.entryPrice - effectivePrice) * pos.quantity;
+          const pnlPercent = ((effectivePrice - pos.entryPrice) / pos.entryPrice) * 100 * (isBuy ? 1 : -1);
 
           // Check Target condition
-          const targetHit = isBuy ? price >= pos.target : price <= pos.target;
+          const targetHit = isBuy ? effectivePrice >= pos.target : effectivePrice <= pos.target;
           // Check Stop Loss condition
-          const slHit = isBuy ? price <= pos.stopLoss : price >= pos.stopLoss;
+          const slHit = isBuy ? effectivePrice <= pos.stopLoss : effectivePrice >= pos.stopLoss;
 
           if (targetHit || slHit) {
             const exitReason: 'TARGET_HIT' | 'STOPLOSS_HIT' = targetHit ? 'TARGET_HIT' : 'STOPLOSS_HIT';
@@ -282,7 +297,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
               updatedOrders[ordIdx] = {
                 ...updatedOrders[ordIdx],
                 status: exitReason,
-                exitPrice: price,
+                exitPrice: effectivePrice,
                 pnl: Math.round(pnl * 100) / 100,
                 pnlPercent: Math.round(pnlPercent * 100) / 100,
                 exitTime: new Date().toISOString()
@@ -292,12 +307,12 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             if (targetHit) {
               logsToAdd.push({
                 type: 'TARGET',
-                message: `🎯 TARGET HIT: ${pos.tradingsymbol} hit ₹${price.toFixed(2)}! Virtual Profit: +₹${pnl.toFixed(2)} (+${pnlPercent.toFixed(2)}%)`
+                message: `🎯 TARGET HIT: ${pos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}! Virtual Profit: +₹${pnl.toFixed(2)} (+${pnlPercent.toFixed(2)}%)`
               });
             } else {
               logsToAdd.push({
                 type: 'STOPLOSS',
-                message: `🛑 STOP LOSS HIT: ${pos.tradingsymbol} hit ₹${price.toFixed(2)}. Virtual Loss: -₹${Math.abs(pnl).toFixed(2)} (${pnlPercent.toFixed(2)}%)`
+                message: `🛑 STOP LOSS HIT: ${pos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}. Virtual Loss: -₹${Math.abs(pnl).toFixed(2)} (${pnlPercent.toFixed(2)}%)`
               });
             }
 
@@ -306,7 +321,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
               tradingsymbol: pos.tradingsymbol,
               direction: pos.direction,
               entryPrice: pos.entryPrice,
-              exitPrice: price,
+              exitPrice: effectivePrice,
               quantity: pos.quantity,
               pnl: Math.round(pnl * 100) / 100,
               pnlPercent: Math.round(pnlPercent * 100) / 100,
@@ -322,7 +337,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             // Position stays open, update price and live MTM
             remainingPositions.push({
               ...pos,
-              currentPrice: price,
+              currentPrice: effectivePrice,
               pnl: Math.round(pnl * 100) / 100,
               pnlPercent: Math.round(pnlPercent * 100) / 100
             });
@@ -399,10 +414,42 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         } else if (window.electronAPI?.invoke) {
           window.electronAPI.invoke(TELEGRAM_SEND_EXIT, { trade: exitTradeData }).catch(() => {});
         }
+      },
+
+      clearOrders: () => set({ orders: [] }),
+
+      repairOrders: () => {
+        set((state) => ({
+          orders: state.orders.map(sanitizePaperOrder)
+        }));
       }
     }),
     {
-      name: 'paper-trading-storage'
+      name: 'paper-trading-storage',
+      onRehydrateStorage: () => (state) => {
+        if (state && Array.isArray(state.orders)) {
+          state.orders = state.orders.map(sanitizePaperOrder);
+        }
+      }
     }
   )
 );
+
+export const sanitizePaperOrder = (o: PaperOrder): PaperOrder => {
+  // If exitPrice is corrupted by paise (> 20x entryPrice), divide by 100
+  if (o.exitPrice && o.entryPrice && o.exitPrice > o.entryPrice * 20) {
+    const correctedExit = Math.round((o.exitPrice / 100) * 100) / 100;
+    const isBuy = o.direction === 'BUY';
+    const pnl = isBuy
+      ? (correctedExit - o.entryPrice) * o.quantity
+      : (o.entryPrice - correctedExit) * o.quantity;
+    const pnlPercent = ((correctedExit - o.entryPrice) / o.entryPrice) * 100 * (isBuy ? 1 : -1);
+    return {
+      ...o,
+      exitPrice: correctedExit,
+      pnl: Math.round(pnl * 100) / 100,
+      pnlPercent: Math.round(pnlPercent * 100) / 100
+    };
+  }
+  return o;
+};

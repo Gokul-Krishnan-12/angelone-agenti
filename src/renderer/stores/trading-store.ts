@@ -74,16 +74,20 @@ export const useTradingStore = create<TradingState>()(
       setAgentState: (agentState) => set((state) => ({ agentState: { ...state.agentState, ...agentState } })),
       setSignals: (signals) => set({ signals }),
       addSignal: (signal) => set((state) => {
+        const signalWithTime = {
+          ...signal,
+          timestamp: signal.timestamp || new Date().toISOString()
+        };
         // Prevent duplicate signals from same strategy on same symbol
         const existingIdx = state.signals.findIndex(
-          s => s.tradingsymbol === signal.tradingsymbol && s.strategy === signal.strategy
+          s => s.tradingsymbol === signalWithTime.tradingsymbol && s.strategy === signalWithTime.strategy
         );
         
         let newSignals = [...state.signals];
         if (existingIdx >= 0) {
-          newSignals[existingIdx] = signal; // Update existing
+          newSignals[existingIdx] = signalWithTime; // Update existing
         } else {
-          newSignals = [signal, ...state.signals]; // Prepend new
+          newSignals = [signalWithTime, ...state.signals]; // Prepend new
         }
         
         // Keep max 50 signals in memory
@@ -95,7 +99,35 @@ export const useTradingStore = create<TradingState>()(
       setActivityLog: (activityLog) => set({ activityLog }),
       addLogEntry: (entry) => set((state) => ({ activityLog: [entry, ...state.activityLog] })),
       setWatchlist: (watchlist) => set({ watchlist }),
-      updateTick: (symbol, tick) => set((state) => ({ ticks: { ...state.ticks, [symbol]: tick } })),
+      updateTick: (symbol, tick) => set((state) => {
+        const cleanSymbol = symbol.replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
+        const tickAny = tick as any;
+        const price = Number(tick.lastPrice ?? tickAny?.last_price ?? tickAny?.ltp ?? 0);
+        let updatedPositions = state.positions;
+
+        if (price > 0 && state.positions.some((p) => p.quantity !== 0)) {
+          updatedPositions = state.positions.map((p) => {
+            const pClean = p.tradingsymbol.replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
+            if (pClean === cleanSymbol && p.quantity !== 0) {
+              const diff = p.quantity > 0 ? (price - p.averagePrice) : (p.averagePrice - price);
+              const unrealised = Math.round(diff * Math.abs(p.quantity) * 100) / 100;
+              const pnl = Math.round(((p.realised || 0) + unrealised) * 100) / 100;
+              return {
+                ...p,
+                lastPrice: price,
+                unrealised,
+                pnl
+              };
+            }
+            return p;
+          });
+        }
+
+        return {
+          ticks: { ...state.ticks, [symbol]: tick },
+          positions: updatedPositions
+        };
+      }),
       setSettings: (settings) => set({ settings }),
       setDashboard: (dashboard) => set({ dashboard }),
       setConnectionStatus: (status) => set({ connectionStatus: status })
@@ -115,6 +147,16 @@ export const useTradingStore = create<TradingState>()(
           statusMessage: ''
         }
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state && Array.isArray(state.signals)) {
+          const now = Date.now();
+          state.signals = state.signals.filter((s) => {
+            if (!s.timestamp) return false;
+            const age = now - new Date(s.timestamp).getTime();
+            return age > 0 && age < 12 * 60 * 60 * 1000;
+          });
+        }
+      }
     }
   )
 );

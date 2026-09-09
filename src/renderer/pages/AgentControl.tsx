@@ -1,7 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTradingStore } from '../stores/trading-store';
 import { useSmartAPI } from '../hooks/useSmartAPI';
-import { Check, X, ShieldAlert, Zap, TrendingUp, Layers, CheckSquare, Square, Filter } from 'lucide-react';
+import { getSignalStatus, formatSignalTime } from '../utils/signal-status';
+import {
+  Check,
+  X,
+  ShieldAlert,
+  Zap,
+  TrendingUp,
+  Layers,
+  CheckSquare,
+  Square,
+  Filter,
+  Clock,
+  AlertTriangle
+} from 'lucide-react';
 
 // Top 10 strategies selected by 6-month backtest P&L on 20 Nifty 50 stocks.
 // Ordered by backtest profitability (rank 1 = highest P&L).
@@ -40,10 +53,18 @@ export const DISABLED_STRATEGIES = [
 ];
 
 const AgentControl: React.FC = () => {
-  const { agentState, signals, setAgentState } = useTradingStore();
+  const { agentState, signals, setAgentState, ticks } = useTradingStore();
   const { startAgent, stopAgent } = useSmartAPI();
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [executedTrade, setExecutedTrade] = useState<string>('');
+
+  // Auto-subscribe signal symbols to ticker stream
+  useEffect(() => {
+    if (signals.length > 0 && window.electronAPI?.ticker?.subscribe) {
+      const syms = signals.map(s => s.tradingsymbol);
+      window.electronAPI.ticker.subscribe(syms as any).catch(() => {});
+    }
+  }, [signals]);
 
   const handleToggle = async () => {
     try {
@@ -94,7 +115,7 @@ const AgentControl: React.FC = () => {
     saveStrategiesToBackend([]);
   };
 
-  // Group signals by tradingsymbol + direction to calculate confluence
+  // Group signals by tradingsymbol + direction to calculate confluence & latest timestamp
   const groupedSignals = React.useMemo(() => {
     const groups: Record<string, {
       tradingsymbol: string;
@@ -102,6 +123,7 @@ const AgentControl: React.FC = () => {
       signals: typeof signals;
       avgConfidence: number;
       confluenceScore: number;
+      latestTimestamp: string;
     }> = {};
 
     signals.forEach(sig => {
@@ -112,10 +134,14 @@ const AgentControl: React.FC = () => {
           direction: sig.direction,
           signals: [],
           avgConfidence: 0,
-          confluenceScore: 0
+          confluenceScore: 0,
+          latestTimestamp: sig.timestamp || ''
         };
       }
       groups[key].signals.push(sig);
+      if (sig.timestamp && (!groups[key].latestTimestamp || sig.timestamp > groups[key].latestTimestamp)) {
+        groups[key].latestTimestamp = sig.timestamp;
+      }
     });
 
     return Object.values(groups)
@@ -312,15 +338,50 @@ const AgentControl: React.FC = () => {
                 const rr = riskDist > 0 ? (rewardDist / riskDist).toFixed(1) : '2.0';
                 const estMarginReq = Math.round(entry * 0.2); // 20% MIS intraday margin
 
+                const clean = group.tradingsymbol.replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
+                const tick = ticks[group.tradingsymbol] || ticks[clean] || ticks[`NSE:${clean}`] || ticks[`${clean}-EQ`];
+                let ltp = Number(tick?.lastPrice ?? tick?.ohlc?.close ?? 0);
+
+                // Auto-normalize 100x paise ticks (e.g. ₹38015.00 -> ₹380.15 for NATIONALUM at ₹384.25)
+                if (entry > 0 && ltp > entry * 20) {
+                  ltp = Math.round((ltp / 100) * 100) / 100;
+                }
+
+                const statusInfo = getSignalStatus({
+                  direction: group.direction,
+                  entryPrice: entry,
+                  stopLoss: sl,
+                  target: tgt,
+                  timestamp: group.latestTimestamp
+                }, ltp);
+                const timeInfo = formatSignalTime(group.latestTimestamp);
+
                 return (
                   <div key={`${group.tradingsymbol}_${group.direction}`} className="bg-surface-900/90 border border-surface-700 rounded-xl p-4 flex flex-col gap-3 shadow-md hover:border-surface-600 transition-all">
                     <div className="flex justify-between items-start">
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2.5 py-1 text-xs font-bold rounded-lg uppercase tracking-wider ${isBuy ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-loss-dark/20 text-loss-light border border-loss/30'}`}>
-                          {group.direction}
-                        </span>
-                        <span className="font-bold text-white text-base">{group.tradingsymbol}</span>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2.5 py-1 text-xs font-bold rounded-lg uppercase tracking-wider ${isBuy ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-loss-dark/20 text-loss-light border border-loss/30'}`}>
+                            {group.direction}
+                          </span>
+                          <span className="font-bold text-white text-base">{group.tradingsymbol}</span>
+
+                          {/* Dynamic Signal Status Badge */}
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1.5 ${statusInfo.badgeBg} ${statusInfo.badgeText} ${statusInfo.badgeBorder}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dotColor} ${statusInfo.status === 'active' ? 'animate-pulse' : ''}`} />
+                            {statusInfo.label}
+                          </span>
+                        </div>
+
+                        {/* Signal Arrival Timestamp */}
+                        <div className="flex items-center gap-1.5 text-surface-400 text-[11px]" title={`Signal generated at ${timeInfo.fullDate || timeInfo.formattedTime}`}>
+                          <Clock size={12} className="text-surface-500" />
+                          <span className="font-mono text-surface-300 font-semibold">{timeInfo.formattedTime}</span>
+                          <span className="text-surface-600">•</span>
+                          <span className="text-surface-400 text-[10px]">{timeInfo.relativeTime}</span>
+                        </div>
                       </div>
+
                       <div className="flex items-center gap-1.5">
                         <span className="text-[10px] bg-accent/20 text-accent-light px-2 py-0.5 rounded font-mono font-bold border border-accent/30">
                           {group.confluenceScore} {group.confluenceScore === 1 ? 'Algo' : 'Algos'}
@@ -340,11 +401,22 @@ const AgentControl: React.FC = () => {
                       ))}
                     </div>
 
-                    {/* Trade Price Details */}
-                    <div className="grid grid-cols-3 gap-2 bg-surface-950/60 p-2.5 rounded-lg border border-surface-800 text-xs">
+                    {/* Trade Price Details with Live LTP */}
+                    <div className="grid grid-cols-4 gap-2 bg-surface-950/70 p-2.5 rounded-lg border border-surface-800 text-xs">
+                      <div>
+                        <span className="text-surface-400 block text-[10px]">LTP (Current)</span>
+                        <span className="font-mono font-bold text-white">
+                          ₹{(ltp > 0 ? ltp : entry).toFixed(2)}
+                        </span>
+                        {ltp > 0 && (
+                          <span className={`block text-[9px] font-mono ${statusInfo.priceDiff >= 0 ? 'text-profit-light' : 'text-loss-light'}`}>
+                            {statusInfo.priceDiff >= 0 ? '+' : ''}{statusInfo.priceDiff.toFixed(1)} ({statusInfo.priceDiffPercent.toFixed(2)}%)
+                          </span>
+                        )}
+                      </div>
                       <div>
                         <span className="text-surface-400 block text-[10px]">Entry</span>
-                        <span className="font-mono font-bold text-white">₹{entry.toFixed(2)}</span>
+                        <span className="font-mono font-bold text-surface-200">₹{entry.toFixed(2)}</span>
                       </div>
                       <div>
                         <span className="text-surface-400 block text-[10px]">Target</span>
@@ -353,6 +425,14 @@ const AgentControl: React.FC = () => {
                       <div>
                         <span className="text-surface-400 block text-[10px]">Stop Loss</span>
                         <span className="font-mono font-bold text-loss-light">₹{sl.toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    {/* Status Context Reason Banner */}
+                    <div className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-lg bg-surface-950/50 border border-surface-800/80">
+                      <div className="flex items-center gap-1.5 text-surface-300">
+                        <span className="text-surface-500 font-semibold text-[10px] uppercase">Status:</span>
+                        <span className={`font-medium ${statusInfo.badgeText}`}>{statusInfo.reason}</span>
                       </div>
                     </div>
 
@@ -376,9 +456,23 @@ const AgentControl: React.FC = () => {
                           setExecutedTrade(`Executed ${group.direction} for ${group.tradingsymbol}`);
                           setTimeout(() => setExecutedTrade(''), 4000);
                         }} 
-                        className="flex-1 bg-profit-dark hover:bg-profit flex items-center justify-center gap-1.5 py-2 rounded-lg transition-colors text-white text-xs font-bold cursor-pointer"
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg transition-colors text-white text-xs font-bold cursor-pointer ${
+                          statusInfo.status === 'expired' 
+                            ? 'bg-surface-700 hover:bg-surface-600 text-surface-300' 
+                            : 'bg-profit-dark hover:bg-profit'
+                        }`}
                       >
-                        <Check size={14} /> Execute Intraday Order
+                        {statusInfo.status === 'expired' ? (
+                          <>
+                            <AlertTriangle size={14} className="text-amber-400" />
+                            <span>Execute (Expired Signal)</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check size={14} />
+                            <span>Execute Intraday Order</span>
+                          </>
+                        )}
                       </button>
                       <button 
                         onClick={() => {

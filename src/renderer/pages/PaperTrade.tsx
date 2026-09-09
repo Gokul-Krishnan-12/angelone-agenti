@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { usePaperTradingStore } from '../stores/paper-trading-store';
+import React, { useState, useEffect } from 'react';
+import { usePaperTradingStore, sanitizePaperOrder } from '../stores/paper-trading-store';
 import {
   Play,
   Square,
@@ -37,8 +37,14 @@ const PaperTrade: React.FC = () => {
     setMaxCapitalPerTrade,
     resetAccount,
     manualSquareOff,
-    clearLogs
+    clearLogs,
+    clearOrders,
+    repairOrders
   } = usePaperTradingStore();
+
+  useEffect(() => {
+    repairOrders();
+  }, [repairOrders]);
 
   const [customBalanceInput, setCustomBalanceInput] = useState<string>('');
   const [showBalanceModal, setShowBalanceModal] = useState<boolean>(false);
@@ -295,10 +301,21 @@ const PaperTrade: React.FC = () => {
             </button>
           </div>
 
+          {activeTab === 'orders' && orders.length > 0 && (
+            <button
+              onClick={clearOrders}
+              className="text-xs text-surface-400 hover:text-loss-light flex items-center gap-1 transition-colors cursor-pointer"
+              title="Clear all recorded simulated orders"
+            >
+              <Trash2 size={13} />
+              <span>Clear History</span>
+            </button>
+          )}
+
           {activeTab === 'logs' && (
             <button
               onClick={clearLogs}
-              className="text-xs text-surface-400 hover:text-loss-light flex items-center gap-1 transition-colors"
+              className="text-xs text-surface-400 hover:text-loss-light flex items-center gap-1 transition-colors cursor-pointer"
             >
               <Trash2 size={13} />
               <span>Clear Log</span>
@@ -429,7 +446,8 @@ const PaperTrade: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-surface-700/50">
-                  {orders.map((o) => {
+                  {orders.map((rawOrder) => {
+                    const o = sanitizePaperOrder(rawOrder);
                     const isBuy = o.direction === 'BUY';
                     const isProf = (o.pnl || 0) >= 0;
 

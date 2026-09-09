@@ -94,8 +94,26 @@ class TickerManager:
         return {"running": self.running, "tokens": list(self.tokens)}
 
     def subscribe(self, tokens: list):
-        for token in tokens:
-            self.tokens.add(str(token))
+        from .smartapi_client import smart_api_client
+
+        added_tokens = []
+        for item in tokens:
+            if not item:
+                continue
+            item_str = str(item).strip()
+            # If not pure numeric, resolve trading symbol to instrument token
+            if not item_str.isdigit():
+                tok = smart_api_client.resolve_token(item_str)
+                if tok:
+                    tok_str = str(tok)
+                    clean_sym = item_str.replace("NSE:", "").replace("-EQ", "").upper()
+                    smart_api_client.symbol_map[tok_str] = clean_sym
+                    self.tokens.add(tok_str)
+                    added_tokens.append(tok_str)
+            else:
+                self.tokens.add(item_str)
+                added_tokens.append(item_str)
+
         if self.sws and self.running and self.tokens:
             try:
                 token_list = [
@@ -109,7 +127,20 @@ class TickerManager:
                 logger.error("Error subscribing tokens: %s", e)
 
     def unsubscribe(self, tokens: list):
-        str_tokens = [str(t) for t in tokens]
+        from .smartapi_client import smart_api_client
+
+        str_tokens = []
+        for item in tokens:
+            if not item:
+                continue
+            item_str = str(item).strip()
+            if not item_str.isdigit():
+                tok = smart_api_client.resolve_token(item_str)
+                if tok:
+                    str_tokens.append(str(tok))
+            else:
+                str_tokens.append(item_str)
+
         for token in str_tokens:
             if token in self.tokens:
                 self.tokens.remove(token)
@@ -138,22 +169,78 @@ class TickerManager:
                 data = getattr(message, "__dict__", {})
 
             # Extract price fields
-            ltp = data.get("last_traded_price") or data.get("ltp") or 0.0
-            # If price is provided in paise (common in exchange binary/raw ticks > 100x), scale
-            if isinstance(ltp, (int, float)) and ltp > 1000000:
-                ltp = ltp / 100.0
+            # SmartWebSocketV2 sends price fields in PAISE (1 INR = 100 paise)
+            raw_ltp = data.get("last_traded_price")
+            if raw_ltp is not None:
+                ltp = float(raw_ltp) / 100.0
+            else:
+                ltp = float(data.get("ltp") or data.get("last_price") or 0.0)
+
+            # Also extract OHLC if available (SmartWebSocketV2 sends these in paise)
+            raw_open = data.get("open_price_of_the_day")
+            raw_high = data.get("high_price_of_the_day")
+            raw_low = data.get("low_price_of_the_day")
+            raw_close = data.get("closed_price")
+
+            ohlc_open = (
+                float(raw_open) / 100.0
+                if raw_open is not None
+                else float(data.get("open") or 0.0)
+            )
+            ohlc_high = (
+                float(raw_high) / 100.0
+                if raw_high is not None
+                else float(data.get("high") or 0.0)
+            )
+            ohlc_low = (
+                float(raw_low) / 100.0
+                if raw_low is not None
+                else float(data.get("low") or 0.0)
+            )
+            ohlc_close = (
+                float(raw_close) / 100.0
+                if raw_close is not None
+                else float(data.get("close") or 0.0)
+            )
 
             token = (
                 data.get("token")
                 or data.get("symbol_token")
                 or data.get("instrument_token")
             )
+            token_str = str(token) if token is not None else None
 
+            # Look up trading symbol from token
+            tradingsymbol = ""
+            if token_str:
+                from .smartapi_client import smart_api_client
+
+                mapped = smart_api_client.symbol_map.get(token_str)
+                if mapped:
+                    tradingsymbol = mapped.replace("-EQ", "").upper()
+
+            if not tradingsymbol:
+                raw_sym = data.get("tradingsymbol") or data.get("symbol") or ""
+                tradingsymbol = (
+                    str(raw_sym).replace("-EQ", "").replace("NSE:", "").upper()
+                )
+
+            price_val = float(ltp)
             event = {
-                "event": "tick",
+                "event": "ticker:tick",
                 "data": {
-                    "instrument_token": str(token) if token else None,
-                    "last_price": float(ltp),
+                    "instrument_token": token_str,
+                    "tradingsymbol": tradingsymbol,
+                    "symbol": tradingsymbol,
+                    "last_price": price_val,
+                    "lastPrice": price_val,
+                    "ltp": price_val,
+                    "ohlc": {
+                        "open": ohlc_open,
+                        "high": ohlc_high,
+                        "low": ohlc_low,
+                        "close": ohlc_close,
+                    },
                     "volume": float(
                         data.get("volume_trade_for_the_day")
                         or data.get("volume")

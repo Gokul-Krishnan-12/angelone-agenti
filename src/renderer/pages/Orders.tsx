@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useTradingStore } from '../stores/trading-store';
+import { useAutoReload } from '../hooks/useAutoReload';
 import OrderForm from '../components/OrderForm';
 import {
   Search,
@@ -23,7 +24,7 @@ const Orders: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
-  const fetchOrders = async (force = false) => {
+  const fetchOrders = async (force = true) => {
     try {
       setRefreshing(true);
       const response = await window.electronAPI?.orders.getAll({ force });
@@ -37,11 +38,8 @@ const Orders: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    fetchOrders(false);
-    const interval = setInterval(() => fetchOrders(false), 10000);
-    return () => clearInterval(interval);
-  }, []);
+  // Auto reload orders on mount, route switch, window focus, and every 5s
+  const { lastSynced, isReloading, reload } = useAutoReload(fetchOrders, { intervalMs: 5000 });
 
   const handleCancelOrder = async (orderId: string) => {
     try {
@@ -154,14 +152,21 @@ const Orders: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => fetchOrders(true)}
-          disabled={refreshing}
-          className="flex items-center gap-2 px-3.5 py-2 bg-surface-800 hover:bg-surface-750 text-surface-200 hover:text-white border border-surface-700 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer disabled:opacity-50 self-start md:self-auto"
-        >
-          <RefreshCw size={14} className={refreshing ? 'animate-spin text-accent-light' : 'text-surface-400'} />
-          <span>{refreshing ? 'Updating Orders...' : 'Refresh Orders'}</span>
-        </button>
+        <div className="flex items-center gap-2 self-start md:self-auto">
+          <span className="text-[11px] font-mono text-surface-400 flex items-center gap-1.5 bg-surface-900/60 px-2.5 py-1.5 rounded-lg border border-surface-800">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Live: {lastSynced}</span>
+          </span>
+          <button
+            onClick={() => reload()}
+            disabled={refreshing || isReloading}
+            className="flex items-center gap-2 px-3.5 py-2 bg-surface-800 hover:bg-surface-750 text-surface-200 hover:text-white border border-surface-700 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer disabled:opacity-50"
+            title="Refresh orders from broker"
+          >
+            <RefreshCw size={14} className={(refreshing || isReloading) ? 'animate-spin text-accent-light' : 'text-surface-400'} />
+            <span>{(refreshing || isReloading) ? 'Syncing...' : 'Refresh'}</span>
+          </button>
+        </div>
       </div>
 
       {/* ─── STATS STRIP ─────────────────────────────────────────────── */}

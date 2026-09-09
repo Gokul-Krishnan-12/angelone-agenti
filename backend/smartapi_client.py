@@ -344,6 +344,33 @@ class SmartApiClient:
                     }
                 )
 
+            # Enrich open positions with live real-time LTP
+            open_symbols = [
+                p["tradingsymbol"] for p in net_positions if p["quantity"] != 0
+            ]
+            if open_symbols:
+                try:
+                    live_ltps = self.get_ltp(open_symbols)
+                    for p in net_positions:
+                        if p["quantity"] != 0:
+                            sym = p["tradingsymbol"]
+                            clean = p["symbol"]
+                            ltp_info = live_ltps.get(sym) or live_ltps.get(clean)
+                            if ltp_info and ltp_info.get("lastPrice", 0) > 0:
+                                live_ltp = float(ltp_info["lastPrice"])
+                                p["lastPrice"] = live_ltp
+                                avg = p["averagePrice"]
+                                qty = p["quantity"]
+                                unrealised = (
+                                    (live_ltp - avg) * qty
+                                    if qty > 0
+                                    else (avg - live_ltp) * abs(qty)
+                                )
+                                p["unrealised"] = round(unrealised, 2)
+                                p["pnl"] = round(p["realised"] + p["unrealised"], 2)
+                except Exception as e:
+                    logger.debug("Failed to enrich open positions with live LTP: %s", e)
+
             result = convert_keys({"net": net_positions, "day": net_positions})
             self._set_cached("positions", result)
             return result
@@ -780,17 +807,21 @@ class SmartApiClient:
             clean = inst.replace("NSE:", "").replace("-EQ", "").upper()
             token = self.resolve_token(clean)
             symbol = self.resolve_trading_symbol(clean)
+            price_val = 0.0
             if self.smart_api and token:
                 try:
                     data = self.smart_api.ltpData("NSE", symbol, token)
                     if data and data.get("status") and data.get("data"):
-                        res_map[inst] = {
-                            "last_price": float(data["data"].get("ltp", 0.0))
-                        }
-                        continue
+                        price_val = float(data["data"].get("ltp", 0.0))
                 except Exception:
                     pass
-            res_map[inst] = {"last_price": 0.0}
+            entry = {
+                "last_price": price_val,
+                "lastPrice": price_val,
+                "ltp": price_val,
+            }
+            res_map[inst] = entry
+            res_map[clean] = entry
         return res_map
 
     def get_quote(self, instruments: List[str]) -> Dict[str, Any]:

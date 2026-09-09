@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { useTradingStore } from '../stores/trading-store';
 import { useSmartAPI } from '../hooks/useSmartAPI';
+import { useAutoReload } from '../hooks/useAutoReload';
 import {
   Activity,
   RefreshCw,
@@ -33,13 +34,9 @@ const Dashboard: React.FC = () => {
   } = useTradingStore();
 
   const { startAgent, stopAgent } = useSmartAPI();
-  const [refreshing, setRefreshing] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [lastSynced, setLastSynced] = useState<string>('Just now');
   const [positionTab, setPositionTab] = useState<'open' | 'all'>('open');
   const [exitConfirmSymbol, setExitConfirmSymbol] = useState<string | null>(null);
-
-  const isFetchingRef = useRef(false);
 
   // Market open check (NSE 09:15 - 15:30 IST Mon-Fri)
   const isMarketOpen = () => {
@@ -79,53 +76,32 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleRefresh = async () => {
-    if (refreshing) return;
-    setRefreshing(true);
+  // Synchronize dashboard summary and positions with fresh data
+  const syncDashboardData = async (force = true) => {
     try {
-      // Parallelize requests with force=true so SmartAPI fetches fresh live data
       const [summary, posResponse] = await Promise.all([
-        window.electronAPI?.dashboard.summary({ force: true }),
-        window.electronAPI?.portfolio.positions({ force: true })
+        window.electronAPI?.dashboard.summary({ force }),
+        window.electronAPI?.portfolio.positions({ force })
       ]);
       if (summary) setDashboard(summary);
       if (posResponse && posResponse.net) {
         setPositions(posResponse.net);
+        const openSyms = posResponse.net.filter((p: any) => p.quantity !== 0).map((p: any) => p.tradingsymbol);
+        if (openSyms.length > 0 && window.electronAPI?.ticker?.subscribe) {
+          window.electronAPI.ticker.subscribe(openSyms).catch(() => {});
+        }
       }
-      setLastSynced(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (err) {
-      console.error('Failed to refresh dashboard:', err);
-    } finally {
-      setRefreshing(false);
+      console.error('Failed to sync dashboard data:', err);
     }
   };
 
-  // Background non-blocking poll with guard
-  useEffect(() => {
-    const fetchData = async () => {
-      if (isFetchingRef.current) return;
-      isFetchingRef.current = true;
-      try {
-        const [summary, posResponse] = await Promise.all([
-          window.electronAPI?.dashboard.summary(),
-          window.electronAPI?.portfolio.positions()
-        ]);
-        if (summary) setDashboard(summary);
-        if (posResponse && posResponse.net) {
-          setPositions(posResponse.net);
-        }
-        setLastSynced(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      } catch (err) {
-        console.error('Failed to fetch dashboard data:', err);
-      } finally {
-        isFetchingRef.current = false;
-      }
-    };
+  // Auto reload dashboard on mount, route switch, window focus, and every 6s
+  const { lastSynced, isReloading, reload } = useAutoReload(syncDashboardData, { intervalMs: 6000 });
 
-    fetchData();
-    const interval = setInterval(fetchData, 12000);
-    return () => clearInterval(interval);
-  }, [setDashboard, setPositions]);
+  const handleRefresh = () => {
+    reload();
+  };
 
   const handleExitPosition = async (symbol: string) => {
     try {
@@ -202,12 +178,12 @@ const Dashboard: React.FC = () => {
 
           <button
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={isReloading}
             className="flex items-center gap-2 px-3.5 py-2 bg-surface-800 hover:bg-surface-750 text-surface-200 hover:text-white border border-surface-700 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer disabled:opacity-50"
             title="Fetch live balance and positions from Angel One"
           >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin text-accent-light' : 'text-surface-400'} />
-            <span>{refreshing ? 'Updating...' : 'Refresh'}</span>
+            <RefreshCw size={14} className={isReloading ? 'animate-spin text-accent-light' : 'text-surface-400'} />
+            <span>{isReloading ? 'Syncing...' : 'Refresh'}</span>
           </button>
 
           <button

@@ -75,7 +75,7 @@ def test_ticker_rpc():
         {
             "jsonrpc": "2.0",
             "method": "ticker_subscribe",
-            "params": {"tokens": [12345]},
+            "params": {"tokens": [12345, "SBIN"]},
             "id": 8,
         }
     )
@@ -86,7 +86,7 @@ def test_ticker_rpc():
         {
             "jsonrpc": "2.0",
             "method": "ticker_unsubscribe",
-            "params": {"tokens": [12345]},
+            "params": {"tokens": [12345, "SBIN"]},
             "id": 9,
         }
     )

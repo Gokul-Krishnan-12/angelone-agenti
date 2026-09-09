@@ -10,6 +10,7 @@ from .notifier import notifier
 from .risk_manager import risk_manager
 from .scanner import scanner
 from .smartapi_client import smart_api_client
+from .ticker import ticker_manager
 from .utils import DateTimeEncoder
 
 
@@ -184,6 +185,10 @@ class TradingEngine:
                 f"Dynamic Watchlist updated: Top {len(self.dynamic_watchlist)} in-play stocks selected "
                 f"(hourly re-screen): {', '.join(self.dynamic_watchlist[:10])}..."
             )
+            try:
+                ticker_manager.subscribe(self.dynamic_watchlist)
+            except Exception:
+                pass
 
         def handle_new_signal(signal):
             if signal["confidence"] >= 70:
@@ -281,6 +286,10 @@ class TradingEngine:
                 "high_water_mark": entry_price,  # for BUY
                 "low_water_mark": entry_price,  # for SELL
             }
+            try:
+                ticker_manager.subscribe([tradingsymbol])
+            except Exception:
+                pass
             return True
         except Exception as e:
             self._push_log(f"Failed to execute signal: {e}")
@@ -307,6 +316,12 @@ class TradingEngine:
                     sym = p["tradingsymbol"]
                     open_symbols.add(sym)
                     open_symbols.add(sym.replace("-EQ", ""))
+
+            if open_symbols:
+                try:
+                    ticker_manager.subscribe(list(open_symbols))
+                except Exception:
+                    pass
 
             # Clean up active_trades if position was closed manually via Angel One App
             symbols_to_remove = []
@@ -356,6 +371,10 @@ class TradingEngine:
                             self._push_log(
                                 f"Adopted open position {symbol} ({direction}) at ₹{avg_price}. Auto-calculated SL: ₹{sl}, Target: ₹{target}"
                             )
+                            try:
+                                ticker_manager.subscribe([active_key])
+                            except Exception:
+                                pass
 
                     if active_key in self.active_trades:
                         trade = self.active_trades[active_key]
