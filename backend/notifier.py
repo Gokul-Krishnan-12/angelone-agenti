@@ -136,13 +136,93 @@ class TelegramNotifier:
 
     def notify_session_summary(self, summary: Dict[str, Any]):
         """
-        Send the daily session summary (total trades, win rate, net P&L).
+        Send the daily session summary (total trades, win rate, net P&L, brokerage).
 
         Parameters
         ----------
         summary : dict with keys:
-            totalTrades, winningTrades, losingTrades, winRate,
-            realisedPnl, totalPnl, mode ('Live' | 'Paper')
+            totalTrades, executedOrders, winningTrades, losingTrades, winRate,
+            grossPnl, brokerage, netPnl, realisedPnl, totalPnl, mode ('Live' | 'Paper'),
+            endingBalance
+        """
+        cfg = self._get_config()
+        if not cfg.get("enabled", False) or not cfg.get("notifyOnSessionEnd", True):
+            return
+
+        mode = str(summary.get("mode", "Live Trading"))
+        if "paper" in mode.lower():
+            self.notify_paper_session_summary(summary)
+            return
+
+        date_str = datetime.datetime.now().strftime("%d %b %Y")
+        now_str = datetime.datetime.now().strftime("%H:%M:%S")
+        total_trades = int(summary.get("totalTrades", 0) or 0)
+        executed_orders = int(summary.get("executedOrders", 0) or 0)
+        if executed_orders == 0 and total_trades > 0:
+            executed_orders = total_trades * 2
+
+        winning = int(summary.get("winningTrades", 0) or 0)
+        losing = int(summary.get("losingTrades", 0) or 0)
+        win_rate = float(summary.get("winRate", 0.0) or 0.0)
+
+        # Charges calculation (supports live SmartAPI estimateCharges or ₹20/order fallback)
+        total_charges = float(summary.get("totalCharges", 0.0) or 0.0)
+        taxes_and_charges = float(summary.get("taxesAndCharges", 0.0) or 0.0)
+        brokerage = float(
+            summary.get("brokerage", 0.0)
+            or summary.get("totalBrokerage", 0.0)
+            or (executed_orders * 20.0)
+        )
+        if total_charges == 0.0:
+            total_charges = brokerage
+
+        gross_pnl = float(
+            summary.get("grossPnl", 0.0)
+            or summary.get("realisedPnl", 0.0)
+            or summary.get("totalPnl", 0.0)
+            or 0.0
+        )
+        net_pnl = float(summary.get("netPnl", gross_pnl - total_charges))
+
+        gross_prefix = "+" if gross_pnl >= 0 else "-"
+        gross_display = f"{gross_prefix}₹{abs(gross_pnl):,.2f}"
+
+        net_prefix = "+" if net_pnl >= 0 else "-"
+        net_display = f"{net_prefix}₹{abs(net_pnl):,.2f}"
+        status_icon = "🟢" if net_pnl >= 0 else "🔴"
+
+        orders_text = (
+            f" ({executed_orders} Executed Orders)" if executed_orders > 0 else ""
+        )
+        if taxes_and_charges > 0:
+            charges_line = (
+                f"💸 <b>Brokerage & Taxes:</b> <code>-₹{total_charges:,.2f}</code> "
+                f"(Brokerage: ₹{brokerage:,.2f} + Taxes/STT: ₹{taxes_and_charges:,.2f})"
+            )
+        else:
+            brokerage_breakdown = (
+                f" (₹20/order × {executed_orders})" if executed_orders > 0 else ""
+            )
+            charges_line = f"💸 <b>Brokerage Collected:</b> <code>-₹{brokerage:,.2f}</code>{brokerage_breakdown}"
+
+        message = (
+            f"📊 <b>DAILY SESSION PERFORMANCE SUMMARY</b>\n\n"
+            f"📅 <b>Date:</b> {date_str} ({now_str} IST)\n"
+            f"🏷 <b>Session:</b> {mode}\n"
+            f"🔢 <b>Total Trades:</b> {total_trades}{orders_text}\n"
+            f"✅ <b>Winning:</b> {winning} | ❌ <b>Losing:</b> {losing}\n"
+            f"🎯 <b>Win Rate:</b> {win_rate:.1f}%\n\n"
+            f"💰 <b>Gross Realised P&L:</b> <code>{gross_display}</code>\n"
+            f"{charges_line}\n"
+            f"{status_icon} <b>Net Realised P&L:</b> <code>{net_display}</code>\n\n"
+            f"🏁 <b>Status:</b> Market Session Closed"
+        )
+
+        self.send_telegram_message_async(message)
+
+    def notify_paper_session_summary(self, summary: Dict[str, Any]):
+        """
+        Send a dedicated daily paper trading session report.
         """
         cfg = self._get_config()
         if not cfg.get("enabled", False) or not cfg.get("notifyOnSessionEnd", True):
@@ -151,26 +231,60 @@ class TelegramNotifier:
         date_str = datetime.datetime.now().strftime("%d %b %Y")
         now_str = datetime.datetime.now().strftime("%H:%M:%S")
         total_trades = int(summary.get("totalTrades", 0) or 0)
+        executed_orders = int(summary.get("executedOrders", 0) or 0)
+        if executed_orders == 0 and total_trades > 0:
+            executed_orders = total_trades * 2
+
         winning = int(summary.get("winningTrades", 0) or 0)
         losing = int(summary.get("losingTrades", 0) or 0)
         win_rate = float(summary.get("winRate", 0.0) or 0.0)
-        realised_pnl = float(
-            summary.get("realisedPnl", 0.0) or summary.get("totalPnl", 0.0) or 0.0
-        )
-        mode = summary.get("mode", "Live & Paper")
 
-        pnl_prefix = "+" if realised_pnl >= 0 else "-"
-        pnl_display = f"{pnl_prefix}₹{abs(realised_pnl):,.2f}"
-        status_icon = "🟢" if realised_pnl >= 0 else "🔴"
+        # Simulated Brokerage Saved (₹20 per virtual order)
+        brokerage = float(
+            summary.get("brokerage", 0.0)
+            or summary.get("totalBrokerage", 0.0)
+            or (executed_orders * 20.0)
+        )
+
+        gross_pnl = float(
+            summary.get("grossPnl", 0.0)
+            or summary.get("realisedPnl", 0.0)
+            or summary.get("totalPnl", 0.0)
+            or 0.0
+        )
+        net_pnl = float(summary.get("netPnl", gross_pnl - brokerage))
+
+        gross_prefix = "+" if gross_pnl >= 0 else "-"
+        gross_display = f"{gross_prefix}₹{abs(gross_pnl):,.2f}"
+
+        net_prefix = "+" if net_pnl >= 0 else "-"
+        net_display = f"{net_prefix}₹{abs(net_pnl):,.2f}"
+        status_icon = "🟢" if net_pnl >= 0 else "🔴"
+
+        orders_text = (
+            f" ({executed_orders} Simulated Orders)" if executed_orders > 0 else ""
+        )
+        brokerage_breakdown = " (₹20/order simulated)" if executed_orders > 0 else ""
+
+        balance_line = ""
+        ending_bal = summary.get("endingBalance") or summary.get("dummyBalance")
+        if ending_bal is not None:
+            balance_line = (
+                f"💼 <b>Ending Virtual Balance:</b> ₹{float(ending_bal):,.2f}\n"
+            )
 
         message = (
-            f"📊 <b>DAILY SESSION PERFORMANCE SUMMARY</b>\n\n"
+            f"📝 <b>DAILY PAPER SESSION PERFORMANCE REPORT</b>\n\n"
             f"📅 <b>Date:</b> {date_str} ({now_str} IST)\n"
-            f"🔢 <b>Total Trades:</b> {total_trades}\n"
+            f"🏷 <b>Session:</b> Paper Trading Sandbox (Simulated)\n"
+            f"🔢 <b>Total Paper Trades:</b> {total_trades}{orders_text}\n"
             f"✅ <b>Winning:</b> {winning} | ❌ <b>Losing:</b> {losing}\n"
-            f"🎯 <b>Win Rate:</b> {win_rate:.1f}%\n"
-            f"{status_icon} <b>Net Realised P&L:</b> <code>{pnl_display}</code>\n"
-            f"🏷 <b>Session:</b> {mode}\n"
+            f"🎯 <b>Win Rate:</b> {win_rate:.1f}%\n\n"
+            f"💰 <b>Gross Virtual P&L:</b> <code>{gross_display}</code>\n"
+            f"💸 <b>Est. Brokerage Saved:</b> <code>₹{brokerage:,.2f}</code>{brokerage_breakdown}\n"
+            f"{status_icon} <b>Net Virtual P&L:</b> <code>{net_display}</code>\n"
+            f"{balance_line}\n"
+            f"🛡 <b>Risk:</b> Zero Financial Risk (Virtual Sandbox)\n"
             f"🏁 <b>Status:</b> Market Session Closed"
         )
 

@@ -108,18 +108,95 @@ def test_notify_session_summary():
         notifier.notify_session_summary(
             {
                 "totalTrades": 4,
+                "executedOrders": 8,
                 "winningTrades": 3,
                 "losingTrades": 1,
                 "winRate": 75.0,
-                "realisedPnl": 1845.50,
+                "grossPnl": 1845.50,
+                "brokerage": 160.00,
+                "netPnl": 1685.50,
                 "mode": "Live Trading",
             }
         )
         assert mock_send.called
         sent_msg = mock_send.call_args[0][0]
         assert "DAILY SESSION PERFORMANCE SUMMARY" in sent_msg
-        assert "Total Trades:</b> 4" in sent_msg
-        assert "+₹1,845.50" in sent_msg
+        assert "Total Trades:</b> 4 (8 Executed Orders)" in sent_msg
+        assert "Gross Realised P&L:</b> <code>+₹1,845.50</code>" in sent_msg
+        assert "Brokerage Collected:</b> <code>-₹160.00</code>" in sent_msg
+        assert "Net Realised P&L:</b> <code>+₹1,685.50</code>" in sent_msg
+
+
+def test_notify_session_summary_with_live_api_charges():
+    notifier = TelegramNotifier()
+    notifier._get_config = MagicMock(
+        return_value={
+            "enabled": True,
+            "notifyOnSessionEnd": True,
+            "botToken": "tok",
+            "chatId": "123",
+        }
+    )
+
+    with patch.object(notifier, "send_telegram_message_async") as mock_send:
+        notifier.notify_session_summary(
+            {
+                "totalTrades": 4,
+                "executedOrders": 8,
+                "winningTrades": 3,
+                "losingTrades": 1,
+                "winRate": 75.0,
+                "grossPnl": 2000.00,
+                "brokerage": 160.00,
+                "totalCharges": 182.50,
+                "taxesAndCharges": 22.50,
+                "netPnl": 1817.50,
+                "mode": "Live Trading",
+            }
+        )
+        assert mock_send.called
+        sent_msg = mock_send.call_args[0][0]
+        assert "DAILY SESSION PERFORMANCE SUMMARY" in sent_msg
+        assert "Brokerage & Taxes:</b> <code>-₹182.50</code>" in sent_msg
+        assert "Brokerage: ₹160.00 + Taxes/STT: ₹22.50" in sent_msg
+        assert "Net Realised P&L:</b> <code>+₹1,817.50</code>" in sent_msg
+
+
+def test_notify_paper_session_summary():
+    notifier = TelegramNotifier()
+    notifier._get_config = MagicMock(
+        return_value={
+            "enabled": True,
+            "notifyOnSessionEnd": True,
+            "botToken": "tok",
+            "chatId": "123",
+        }
+    )
+
+    with patch.object(notifier, "send_telegram_message_async") as mock_send:
+        notifier.notify_session_summary(
+            {
+                "totalTrades": 2,
+                "executedOrders": 4,
+                "winningTrades": 2,
+                "losingTrades": 0,
+                "winRate": 100.0,
+                "grossPnl": 2400.00,
+                "brokerage": 80.00,
+                "netPnl": 2320.00,
+                "endingBalance": 102320.00,
+                "mode": "Paper Trading",
+            }
+        )
+        assert mock_send.called
+        sent_msg = mock_send.call_args[0][0]
+        assert "DAILY PAPER SESSION PERFORMANCE REPORT" in sent_msg
+        assert "Paper Trading Sandbox" in sent_msg
+        assert "Total Paper Trades:</b> 2 (4 Simulated Orders)" in sent_msg
+        assert "Est. Brokerage Saved:</b> <code>₹80.00</code>" in sent_msg
+        assert "Net Virtual P&L:</b> <code>+₹2,320.00</code>" in sent_msg
+        assert "Ending Virtual Balance:</b> ₹102,320.00" in sent_msg
+        assert "Zero Financial Risk" in sent_msg
 
 
 def test_telegram_rpc_handlers():

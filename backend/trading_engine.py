@@ -669,15 +669,64 @@ class TradingEngine:
             realised_pnl = sum(p.get("realised", 0) for p in positions)
             total_pnl = sum(p.get("pnl", p.get("m2m", 0)) for p in positions)
 
+            # Retrieve executed orders to compute broker commissions
+            completed_orders = []
+            try:
+                orders = smart_api_client.get_orders(force=True)
+                completed_orders = [
+                    o for o in orders if str(o.get("status", "")).upper() == "COMPLETE"
+                ]
+                executed_orders = len(completed_orders)
+            except Exception:
+                executed_orders = 0
+
+            # Fallback: if orderbook was empty but positions exist, 2 orders per round-trip trade
+            if executed_orders == 0 and trades_today > 0:
+                executed_orders = trades_today * 2
+
+            # Query Angel One's live estimateCharges API for exact brokerage, STT, and taxes
+            brokerage = round(executed_orders * 20.0, 2)
+            total_charges = brokerage
+            taxes_and_charges = 0.0
+
+            if completed_orders:
+                try:
+                    charges_data = smart_api_client.estimate_charges(completed_orders)
+                    summary_data = charges_data.get("summary", {})
+                    total_api_charges = float(
+                        summary_data.get("total_charges", 0.0) or 0.0
+                    )
+                    if total_api_charges > 0:
+                        total_charges = round(total_api_charges, 2)
+                        for item in summary_data.get("breakup", []):
+                            if "brokerage" in str(item.get("name", "")).lower():
+                                brokerage = round(
+                                    float(item.get("amount", 0.0) or 0.0), 2
+                                )
+                        taxes_and_charges = round(
+                            max(0.0, total_charges - brokerage), 2
+                        )
+                except Exception as e:
+                    self._push_log(
+                        f"Charges estimation fallback to standard tariff: {e}"
+                    )
+
+            gross_pnl = round(realised_pnl or total_pnl or risk_manager.daily_pnl, 2)
+            net_pnl = round(gross_pnl - total_charges, 2)
+
             notifier.notify_session_summary(
                 {
                     "totalTrades": trades_today,
+                    "executedOrders": executed_orders,
                     "winningTrades": winning_trades,
                     "losingTrades": losing_trades,
                     "winRate": round(win_rate, 2),
-                    "realisedPnl": round(
-                        realised_pnl or total_pnl or risk_manager.daily_pnl, 2
-                    ),
+                    "grossPnl": gross_pnl,
+                    "brokerage": brokerage,
+                    "totalCharges": total_charges,
+                    "taxesAndCharges": taxes_and_charges,
+                    "netPnl": net_pnl,
+                    "realisedPnl": net_pnl,
                     "totalPnl": round(total_pnl or risk_manager.daily_pnl, 2),
                     "mode": f"Live Trading ({self.mode.capitalize()} Mode)",
                 }

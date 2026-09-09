@@ -201,6 +201,14 @@ def handle_request(req):
         elif method == "get_trades":
             return success(smart_api_client.get_trades())
 
+        elif method == "estimate_charges":
+            orders = (
+                params.get("orders", [])
+                if isinstance(params, dict)
+                else (params if isinstance(params, list) else [])
+            )
+            return success(smart_api_client.estimate_charges(orders))
+
         elif method == "get_holdings":
             return success(smart_api_client.get_holdings())
 

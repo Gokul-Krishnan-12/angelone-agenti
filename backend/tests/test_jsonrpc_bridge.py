@@ -176,3 +176,26 @@ def test_get_historical_validation():
     assert res["id"] == 19
     assert "error" in res
     assert res["error"]["code"] == -32602
+
+
+def test_estimate_charges_rpc():
+    mock_charges = {
+        "summary": {
+            "total_charges": 182.5,
+            "breakup": [{"name": "Angel One Brokerage", "amount": 160.0}],
+        }
+    }
+    with patch(
+        "backend.smartapi_client.smart_api_client.estimate_charges",
+        return_value=mock_charges,
+    ):
+        res = handle_request(
+            {
+                "jsonrpc": "2.0",
+                "method": "estimate_charges",
+                "params": {"orders": [{"tradingsymbol": "SBIN-EQ"}]},
+                "id": 20,
+            }
+        )
+        assert res["id"] == 20
+        assert res["result"] == mock_charges

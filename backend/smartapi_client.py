@@ -495,6 +495,61 @@ class SmartApiClient:
             logger.error("Error getting trade book: %s", e)
             return []
 
+    def estimate_charges(self, orders: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Query SmartAPI estimateCharges API to fetch broker fees, STT, GST, and regulatory charges.
+
+        Parameters
+        ----------
+        orders : list of dicts with keys:
+            tradingsymbol / symbol_name, product / product_type, transactionType / transaction_type,
+            quantity / filledQuantity, price / averagePrice, exchange, token
+        """
+        if not self.smart_api:
+            return {}
+        try:
+            formatted_orders = []
+            for o in orders:
+                sym = str(o.get("symbol_name") or o.get("tradingsymbol") or "")
+                clean_sym = sym.replace("-EQ", "").upper()
+                exchange = str(o.get("exchange") or "NSE").upper()
+                token = str(o.get("token") or self.resolve_token(clean_sym, exchange))
+                prod = str(
+                    o.get("product_type") or o.get("product") or "INTRADAY"
+                ).upper()
+                if prod == "MIS":
+                    prod = "INTRADAY"
+
+                qty = int(o.get("quantity") or o.get("filledQuantity") or 1)
+                price = float(o.get("price") or o.get("averagePrice") or 0.0)
+                tx_type = str(
+                    o.get("transaction_type") or o.get("transactionType") or "BUY"
+                ).upper()
+
+                if clean_sym and token:
+                    formatted_orders.append(
+                        {
+                            "product_type": prod,
+                            "transaction_type": tx_type,
+                            "quantity": str(qty),
+                            "price": str(round(price, 2)),
+                            "exchange": exchange,
+                            "symbol_name": clean_sym,
+                            "token": str(token),
+                        }
+                    )
+
+            if not formatted_orders:
+                return {}
+
+            res = self.smart_api.estimateCharges({"orders": formatted_orders})
+            if res and res.get("status") and isinstance(res.get("data"), dict):
+                return res["data"]
+            return {}
+        except Exception as e:
+            logger.error("Error calling estimateCharges API: %s", e)
+            return {}
+
     def resolve_token(self, tradingsymbol: str, exchange: str = "NSE") -> str:
         """Resolve a trading symbol (e.g. 'RELIANCE' or 'RELIANCE-EQ') to an Angel One token."""
         clean = tradingsymbol.replace("-EQ", "").upper()

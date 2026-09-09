@@ -59,6 +59,15 @@ const PaperTrade: React.FC = () => {
   const totalEquity = dummyBalance + totalMarginUsed + totalUnrealizedPnl;
   const totalReturnPct = initialCapital > 0 ? ((totalEquity - initialCapital) / initialCapital) * 100 : 0;
 
+  // Today's paper metrics (IST date)
+  const todayIst = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const todayOrders = orders.filter((o) => {
+    if (!o.entryTime) return false;
+    return new Date(o.entryTime).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === todayIst;
+  });
+  const todayExecutedOrders = todayOrders.length * 2;
+  const todayBrokerageSaved = todayExecutedOrders * 20;
+
   const targetHitCount = closedOrders.filter((o) => o.status === 'TARGET_HIT').length;
   const slHitCount = closedOrders.filter((o) => o.status === 'STOPLOSS_HIT').length;
   const autoSquaredOffCount = closedOrders.filter((o) => o.status === 'AUTO_SQUARE_OFF').length;
@@ -159,9 +168,15 @@ const PaperTrade: React.FC = () => {
             </span>
           </div>
         </div>
-        <span className="text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-1 rounded bg-surface-800 text-surface-300 border border-surface-700 shrink-0">
-          Isolated Sandbox
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="text-right text-[11px] hidden sm:block">
+            <span className="text-surface-400 block">Today's Brokerage Saved</span>
+            <span className="font-mono font-bold text-profit-light">₹{todayBrokerageSaved.toLocaleString('en-IN')} ({todayOrders.length} trades)</span>
+          </div>
+          <span className="text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-1 rounded bg-surface-800 text-surface-300 border border-surface-700">
+            Isolated Sandbox
+          </span>
+        </div>
       </div>
 
       {/* ─── TOP 4 METRIC CARDS ────────────────────────────────────────── */}

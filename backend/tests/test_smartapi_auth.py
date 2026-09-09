@@ -112,3 +112,34 @@ def test_smartapi_client_caching():
     m3 = client.get_margins(force=True)
     assert m3["equity"]["net"] == 5000.0
     assert mock_smart_connect.rmsLimit.call_count == 2
+
+
+def test_estimate_charges_client():
+    client = SmartApiClient()
+    mock_smart_connect = MagicMock()
+    mock_smart_connect.estimateCharges.return_value = {
+        "status": True,
+        "message": "SUCCESS",
+        "data": {
+            "summary": {
+                "total_charges": 45.8,
+                "breakup": [{"name": "Angel One Brokerage", "amount": 20.0}],
+            }
+        },
+    }
+    client.smart_api = mock_smart_connect
+    client.token_map = {"INFY": "1594"}
+
+    res = client.estimate_charges(
+        [
+            {
+                "tradingsymbol": "INFY-EQ",
+                "transactionType": "BUY",
+                "quantity": 10,
+                "price": 1800.0,
+            }
+        ]
+    )
+    assert "summary" in res
+    assert res["summary"]["total_charges"] == 45.8
+    assert mock_smart_connect.estimateCharges.called

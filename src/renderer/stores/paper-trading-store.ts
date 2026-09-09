@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Signal } from '@shared/types';
-import { TELEGRAM_SEND_EXIT } from '@shared/ipc-channels';
+import { TELEGRAM_SEND_EXIT, TELEGRAM_SEND_SUMMARY } from '@shared/ipc-channels';
 
 export interface PaperPosition {
   id: string;
@@ -50,6 +50,7 @@ interface PaperTradingState {
   orders: PaperOrder[];
   activityLog: PaperLogEntry[];
   maxCapitalPerTrade: number;
+  lastPaperSummaryDate: string | null;
 
   setDummyBalance: (amount: number) => void;
   setIsRunning: (running: boolean) => void;
@@ -59,6 +60,7 @@ interface PaperTradingState {
   updateTickPrice: (tradingsymbol: string, price: number) => void;
   manualSquareOff: (positionId: string) => void;
   autoSquareOffIntraday: () => boolean;
+  sendDailyPaperSummary: (force?: boolean) => boolean;
   clearOrders: () => void;
   repairOrders: () => void;
   clearLogs: () => void;
@@ -91,6 +93,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       isRunning: false,
       positions: [],
       orders: [],
+      lastPaperSummaryDate: null,
       activityLog: [
         {
           id: 'init-1',
@@ -420,10 +423,66 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         }
       },
 
+      sendDailyPaperSummary: (force = false): boolean => {
+        const state = get();
+        const now = new Date();
+        const todayIst = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+        if (!force && state.lastPaperSummaryDate === todayIst) {
+          return false;
+        }
+
+        // Filter paper orders placed today in IST
+        const todayOrders = state.orders.filter((o) => {
+          if (!o.entryTime) return false;
+          const orderDate = new Date(o.entryTime).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+          return orderDate === todayIst;
+        });
+
+        // Only dispatch the paper performance report if ANY paper trade was taken today
+        if (todayOrders.length === 0) {
+          if (!force) {
+            set({ lastPaperSummaryDate: todayIst });
+          }
+          return false;
+        }
+
+        const totalTrades = todayOrders.length;
+        const executedOrders = totalTrades * 2;
+        const winningTrades = todayOrders.filter((o) => (o.pnl || 0) > 0).length;
+        const losingTrades = todayOrders.filter((o) => (o.pnl || 0) < 0).length;
+        const winRate = (winningTrades / totalTrades) * 100;
+        const grossPnl = todayOrders.reduce((acc, o) => acc + (o.pnl || 0), 0);
+        const brokerage = executedOrders * 20.0;
+        const netPnl = grossPnl - brokerage;
+
+        const payload = {
+          totalTrades,
+          executedOrders,
+          winningTrades,
+          losingTrades,
+          winRate: Math.round(winRate * 10) / 10,
+          grossPnl: Math.round(grossPnl * 100) / 100,
+          brokerage: Math.round(brokerage * 100) / 100,
+          netPnl: Math.round(netPnl * 100) / 100,
+          realisedPnl: Math.round(netPnl * 100) / 100,
+          endingBalance: Math.round(state.dummyBalance * 100) / 100,
+          mode: 'Paper Trading'
+        };
+
+        if (window.electronAPI?.telegram?.sendSummary) {
+          window.electronAPI.telegram.sendSummary(payload).catch(() => {});
+        } else if (window.electronAPI?.invoke) {
+          window.electronAPI.invoke(TELEGRAM_SEND_SUMMARY, { summary: payload }).catch(() => {});
+        }
+
+        set({ lastPaperSummaryDate: todayIst });
+        get().addLog('INFO', `📊 Dispatched Daily Paper Session Performance Report to Telegram (${totalTrades} trades, Net: ₹${netPnl.toFixed(2)}).`);
+        return true;
+      },
+
       autoSquareOffIntraday: (): boolean => {
         const state = get();
-        if (state.positions.length === 0) return false;
-
         const now = new Date();
         const istString = now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
         const istDate = new Date(istString);
@@ -439,67 +498,75 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         const autoSquareOffCutoff = 15 * 60 + 15;
         if (timeInMinutes < autoSquareOffCutoff) return false;
 
-        let balanceDelta = 0;
-        const updatedOrders = [...state.orders];
-        const logsToAdd: { type: PaperLogEntry['type']; message: string }[] = [];
+        let hasSquaredOff = false;
 
-        for (const pos of state.positions) {
-          const isBuy = pos.direction === 'BUY';
-          const effectiveExitPrice = (pos.currentPrice && pos.currentPrice > 0) ? pos.currentPrice : pos.entryPrice;
-          const pnl = isBuy
-            ? (effectiveExitPrice - pos.entryPrice) * pos.quantity
-            : (pos.entryPrice - effectiveExitPrice) * pos.quantity;
-          const pnlPercent = ((effectiveExitPrice - pos.entryPrice) / pos.entryPrice) * 100 * (isBuy ? 1 : -1);
+        if (state.positions.length > 0) {
+          let balanceDelta = 0;
+          const updatedOrders = [...state.orders];
+          const logsToAdd: { type: PaperLogEntry['type']; message: string }[] = [];
 
-          balanceDelta += pos.marginUsed + pnl;
+          for (const pos of state.positions) {
+            const isBuy = pos.direction === 'BUY';
+            const effectiveExitPrice = (pos.currentPrice && pos.currentPrice > 0) ? pos.currentPrice : pos.entryPrice;
+            const pnl = isBuy
+              ? (effectiveExitPrice - pos.entryPrice) * pos.quantity
+              : (pos.entryPrice - effectiveExitPrice) * pos.quantity;
+            const pnlPercent = ((effectiveExitPrice - pos.entryPrice) / pos.entryPrice) * 100 * (isBuy ? 1 : -1);
 
-          const ordIdx = updatedOrders.findIndex((o) => o.tradingsymbol === pos.tradingsymbol && o.status === 'OPEN');
-          if (ordIdx >= 0) {
-            updatedOrders[ordIdx] = {
-              ...updatedOrders[ordIdx],
-              status: 'AUTO_SQUARE_OFF',
+            balanceDelta += pos.marginUsed + pnl;
+
+            const ordIdx = updatedOrders.findIndex((o) => o.tradingsymbol === pos.tradingsymbol && o.status === 'OPEN');
+            if (ordIdx >= 0) {
+              updatedOrders[ordIdx] = {
+                ...updatedOrders[ordIdx],
+                status: 'AUTO_SQUARE_OFF',
+                exitPrice: effectiveExitPrice,
+                pnl: Math.round(pnl * 100) / 100,
+                pnlPercent: Math.round(pnlPercent * 100) / 100,
+                exitTime: new Date().toISOString()
+              };
+            }
+
+            logsToAdd.push({
+              type: 'EXIT',
+              message: `⏰ 3:15 PM Intraday MIS Auto Square-Off: Closed ${pos.tradingsymbol} (${pos.direction}) @ ₹${effectiveExitPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? '+' : ''}₹${pnl.toFixed(2)} (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`
+            });
+
+            // Trigger Telegram exit notification
+            const exitTradeData = {
+              tradingsymbol: pos.tradingsymbol,
+              direction: pos.direction,
+              entryPrice: pos.entryPrice,
               exitPrice: effectiveExitPrice,
+              quantity: pos.quantity,
               pnl: Math.round(pnl * 100) / 100,
               pnlPercent: Math.round(pnlPercent * 100) / 100,
-              exitTime: new Date().toISOString()
+              exitReason: 'INTRADAY_AUTO_SQUARE_OFF (3:15 PM Cutoff)',
+              mode: 'Paper Trading'
             };
+            if (window.electronAPI?.telegram?.sendExit) {
+              window.electronAPI.telegram.sendExit(exitTradeData).catch(() => {});
+            } else if (window.electronAPI?.invoke) {
+              window.electronAPI.invoke(TELEGRAM_SEND_EXIT, { trade: exitTradeData }).catch(() => {});
+            }
           }
 
-          logsToAdd.push({
-            type: 'EXIT',
-            message: `⏰ 3:15 PM Intraday MIS Auto Square-Off: Closed ${pos.tradingsymbol} (${pos.direction}) @ ₹${effectiveExitPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? '+' : ''}₹${pnl.toFixed(2)} (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`
+          set({
+            dummyBalance: state.dummyBalance + balanceDelta,
+            positions: [],
+            orders: updatedOrders
           });
 
-          // Trigger Telegram exit notification
-          const exitTradeData = {
-            tradingsymbol: pos.tradingsymbol,
-            direction: pos.direction,
-            entryPrice: pos.entryPrice,
-            exitPrice: effectiveExitPrice,
-            quantity: pos.quantity,
-            pnl: Math.round(pnl * 100) / 100,
-            pnlPercent: Math.round(pnlPercent * 100) / 100,
-            exitReason: 'INTRADAY_AUTO_SQUARE_OFF (3:15 PM Cutoff)',
-            mode: 'Paper Trading'
-          };
-          if (window.electronAPI?.telegram?.sendExit) {
-            window.electronAPI.telegram.sendExit(exitTradeData).catch(() => {});
-          } else if (window.electronAPI?.invoke) {
-            window.electronAPI.invoke(TELEGRAM_SEND_EXIT, { trade: exitTradeData }).catch(() => {});
+          for (const l of logsToAdd) {
+            get().addLog(l.type, l.message);
           }
+          hasSquaredOff = true;
         }
 
-        set({
-          dummyBalance: state.dummyBalance + balanceDelta,
-          positions: [],
-          orders: updatedOrders
-        });
+        // Check and dispatch daily paper session performance report (if any trade taken today)
+        get().sendDailyPaperSummary(false);
 
-        for (const l of logsToAdd) {
-          get().addLog(l.type, l.message);
-        }
-
-        return true;
+        return hasSquaredOff;
       },
 
       clearOrders: () => set({ orders: [] }),
@@ -513,12 +580,25 @@ export const usePaperTradingStore = create<PaperTradingState>()(
     }),
     {
       name: 'paper-trading-storage',
+      partialize: (state) => ({
+        dummyBalance: state.dummyBalance,
+        initialCapital: state.initialCapital,
+        positions: state.positions,
+        orders: state.orders,
+        activityLog: state.activityLog,
+        maxCapitalPerTrade: state.maxCapitalPerTrade,
+        lastPaperSummaryDate: state.lastPaperSummaryDate
+        // isRunning is intentionally excluded so paper trading NEVER auto-starts on app launch
+      }),
       onRehydrateStorage: () => (state) => {
-        if (state && Array.isArray(state.orders)) {
-          state.orders = state.orders.map(sanitizePaperOrder);
-        }
-        if (state && typeof state.autoSquareOffIntraday === 'function') {
-          state.autoSquareOffIntraday();
+        if (state) {
+          state.isRunning = false; // Always ensure stopped on app startup / reload
+          if (Array.isArray(state.orders)) {
+            state.orders = state.orders.map(sanitizePaperOrder);
+          }
+          if (typeof state.autoSquareOffIntraday === 'function') {
+            state.autoSquareOffIntraday();
+          }
         }
       }
     }
