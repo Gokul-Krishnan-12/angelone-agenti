@@ -13,6 +13,10 @@ export interface PaperPosition {
   currentPrice: number;
   stopLoss: number;
   target: number;
+  target1?: number;
+  target2?: number;
+  partialBooked?: boolean;
+  originalQuantity?: number;
   strategy: string;
   entryTime: string;
   marginUsed: number;
@@ -244,6 +248,20 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             ? entryPrice * 0.985
             : entryPrice * 1.015;
 
+        // Calculate Target 1 (1:2 R:R) & Target 2 for partial profit booking on asymmetric setups
+        const riskDist = Math.abs(entryPrice - stopLoss);
+        const rewardDist = Math.abs(target - entryPrice);
+        const rrRatio = riskDist > 0 ? rewardDist / riskDist : 0;
+
+        let target1: number | undefined;
+        const target2 = target;
+        // If high R:R (> 2.2), set Target 1 at 1:2 R:R and Target 2 at full target
+        if (rrRatio > 2.2 && riskDist > 0) {
+          target1 = direction === 'BUY'
+            ? Math.round((entryPrice + riskDist * 2.0) * 100) / 100
+            : Math.round((entryPrice - riskDist * 2.0) * 100) / 100;
+        }
+
         const newPosition: PaperPosition = {
           id: posId,
           tradingsymbol: cleanSymbol,
@@ -254,6 +272,10 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           currentPrice: entryPrice,
           stopLoss,
           target,
+          target1,
+          target2,
+          partialBooked: false,
+          originalQuantity: quantity,
           strategy: signal.strategy,
           entryTime: new Date().toISOString(),
           marginUsed: actualMarginUsed,
@@ -323,24 +345,66 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             : (pos.entryPrice - effectivePrice) * pos.quantity;
           const pnlPercent = ((effectivePrice - pos.entryPrice) / pos.entryPrice) * 100 * (isBuy ? 1 : -1);
 
-          // Check Target condition
-          const targetHit = isBuy ? effectivePrice >= pos.target : effectivePrice <= pos.target;
-          // Check Stop Loss condition
-          const slHit = isBuy ? effectivePrice <= pos.stopLoss : effectivePrice >= pos.stopLoss;
+          let currentPos = { ...pos };
+
+          // ── Check Target 1 (Partial Profit Booking) ───────────
+          if (currentPos.target1 && !currentPos.partialBooked && currentPos.quantity >= 2) {
+            const hitTarget1 = isBuy
+              ? effectivePrice >= currentPos.target1
+              : effectivePrice <= currentPos.target1;
+
+            if (hitTarget1) {
+              const exitQty = Math.floor(currentPos.quantity / 2);
+              const partialPnl = isBuy
+                ? (effectivePrice - currentPos.entryPrice) * exitQty
+                : (currentPos.entryPrice - effectivePrice) * exitQty;
+
+              // Brokerage safeguard: ensure partial profit >= ₹250 to justify extra transaction
+              if (partialPnl >= 250 && exitQty >= 1) {
+                const releasedMargin = (exitQty * currentPos.entryPrice) / 5;
+                balanceDelta += releasedMargin + partialPnl;
+
+                const remainingQty = currentPos.quantity - exitQty;
+                currentPos = {
+                  ...currentPos,
+                  quantity: remainingQty,
+                  marginUsed: Math.max(0, currentPos.marginUsed - releasedMargin),
+                  stopLoss: currentPos.entryPrice, // Move SL to Breakeven!
+                  target: currentPos.target2 || currentPos.target,
+                  partialBooked: true
+                };
+
+                logsToAdd.push({
+                  type: 'TARGET',
+                  message: `🎯 PARTIAL TARGET 1 HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}! Booked 50% (${exitQty} shares, +₹${partialPnl.toFixed(2)}). SL moved to Breakeven @ ₹${currentPos.entryPrice.toFixed(2)}.`
+                });
+              }
+            }
+          }
+
+          const currentPnl = isBuy
+            ? (effectivePrice - currentPos.entryPrice) * currentPos.quantity
+            : (currentPos.entryPrice - effectivePrice) * currentPos.quantity;
+          const currentPnlPercent = ((effectivePrice - currentPos.entryPrice) / currentPos.entryPrice) * 100 * (isBuy ? 1 : -1);
+
+          // Check Target condition (Target 2 or full target)
+          const targetHit = isBuy ? effectivePrice >= currentPos.target : effectivePrice <= currentPos.target;
+          // Check Stop Loss condition (Breakeven SL if partial booked, else initial SL)
+          const slHit = isBuy ? effectivePrice <= currentPos.stopLoss : effectivePrice >= currentPos.stopLoss;
 
           if (targetHit || slHit) {
             const exitReason: 'TARGET_HIT' | 'STOPLOSS_HIT' = targetHit ? 'TARGET_HIT' : 'STOPLOSS_HIT';
-            balanceDelta += pos.marginUsed + pnl;
+            balanceDelta += currentPos.marginUsed + currentPnl;
 
             // Update matching order
-            const ordIdx = updatedOrders.findIndex((o) => o.tradingsymbol === pos.tradingsymbol && o.status === 'OPEN');
+            const ordIdx = updatedOrders.findIndex((o) => o.tradingsymbol === currentPos.tradingsymbol && o.status === 'OPEN');
             if (ordIdx >= 0) {
               updatedOrders[ordIdx] = {
                 ...updatedOrders[ordIdx],
                 status: exitReason,
                 exitPrice: effectivePrice,
-                pnl: Math.round(pnl * 100) / 100,
-                pnlPercent: Math.round(pnlPercent * 100) / 100,
+                pnl: Math.round(currentPnl * 100) / 100,
+                pnlPercent: Math.round(currentPnlPercent * 100) / 100,
                 exitTime: new Date().toISOString()
               };
             }
@@ -348,25 +412,28 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             if (targetHit) {
               logsToAdd.push({
                 type: 'TARGET',
-                message: `🎯 TARGET HIT: ${pos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}! Virtual Profit: +₹${pnl.toFixed(2)} (+${pnlPercent.toFixed(2)}%)`
+                message: `🎯 TARGET HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}! Virtual Profit: +₹${currentPnl.toFixed(2)} (+${currentPnlPercent.toFixed(2)}%)`
               });
             } else {
+              const isBreakeven = currentPos.partialBooked && Math.abs(effectivePrice - currentPos.entryPrice) < currentPos.entryPrice * 0.002;
               logsToAdd.push({
                 type: 'STOPLOSS',
-                message: `🛑 STOP LOSS HIT: ${pos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}. Virtual Loss: -₹${Math.abs(pnl).toFixed(2)} (${pnlPercent.toFixed(2)}%)`
+                message: isBreakeven
+                  ? `🛡 BREAKEVEN EXIT: ${currentPos.tradingsymbol} closed at ₹${effectivePrice.toFixed(2)} with zero loss on remaining runner.`
+                  : `🛑 STOP LOSS HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}. Virtual Loss: -₹${Math.abs(currentPnl).toFixed(2)} (${currentPnlPercent.toFixed(2)}%)`
               });
             }
 
             // Trigger Telegram exit notification
             const exitTradeData = {
-              tradingsymbol: pos.tradingsymbol,
-              direction: pos.direction,
-              entryPrice: pos.entryPrice,
+              tradingsymbol: currentPos.tradingsymbol,
+              direction: currentPos.direction,
+              entryPrice: currentPos.entryPrice,
               exitPrice: effectivePrice,
-              quantity: pos.quantity,
-              pnl: Math.round(pnl * 100) / 100,
-              pnlPercent: Math.round(pnlPercent * 100) / 100,
-              exitReason: targetHit ? 'TARGET' : 'STOPLOSS',
+              quantity: currentPos.quantity,
+              pnl: Math.round(currentPnl * 100) / 100,
+              pnlPercent: Math.round(currentPnlPercent * 100) / 100,
+              exitReason: targetHit ? 'TARGET' : (currentPos.partialBooked ? 'BREAKEVEN' : 'STOPLOSS'),
               mode: 'Paper Trading'
             };
             if (window.electronAPI?.telegram?.sendExit) {
@@ -377,10 +444,10 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           } else {
             // Position stays open, update price and live MTM
             remainingPositions.push({
-              ...pos,
+              ...currentPos,
               currentPrice: effectivePrice,
-              pnl: Math.round(pnl * 100) / 100,
-              pnlPercent: Math.round(pnlPercent * 100) / 100
+              pnl: Math.round(currentPnl * 100) / 100,
+              pnlPercent: Math.round(currentPnlPercent * 100) / 100
             });
           }
         }

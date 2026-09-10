@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Bot, FlaskConical, ClipboardList, Eye, Compass, ScrollText, Settings, Menu } from 'lucide-react';
+import { LayoutDashboard, Bot, FlaskConical, ClipboardList, Eye, Compass, ScrollText, Settings, Menu, BookOpen } from 'lucide-react';
 import { useTradingStore } from '../stores/trading-store';
 
 const Sidebar: React.FC = () => {
@@ -17,6 +17,7 @@ const Sidebar: React.FC = () => {
     { to: '/watchlist', icon: <Eye size={20} />, label: 'Watchlist' },
     { to: '/swing-screener', icon: <Compass size={20} />, label: 'Swing Screener' },
     { to: '/activity', icon: <ScrollText size={20} />, label: 'Activity Log' },
+    { to: '/guide', icon: <BookOpen size={20} />, label: 'System Guide' },
     { to: '/settings', icon: <Settings size={20} />, label: 'Settings' }
   ];
 

@@ -279,9 +279,30 @@ class TradingEngine:
                 f"Executed {transaction_type} for {tradingsymbol}, qty {qty}, order_id {order_id}"
             )
             risk_manager.increment_trade()
+            # Check if setup has asymmetric high R:R for multi-target partial booking
+            risk_dist = abs(entry_price - stop_loss)
+            reward_dist = abs(target - entry_price)
+            rr_ratio = reward_dist / risk_dist if risk_dist > 0 else 0.0
+
+            risk_cfg = config_manager.get_risk_config()
+            partial_enabled = bool(risk_cfg.get("partialBookingEnabled", True))
+            target1_rr = float(risk_cfg.get("partialBookingTargetRR", 2.0))
+
+            target1 = target
+            target2 = target
+            if partial_enabled and rr_ratio > 2.2 and risk_dist > 0:
+                if direction == "BUY":
+                    target1 = round(entry_price + (risk_dist * target1_rr), 2)
+                else:
+                    target1 = round(entry_price - (risk_dist * target1_rr), 2)
+
             self.active_trades[tradingsymbol] = {
                 "sl": stop_loss,
                 "target": target,
+                "target1": target1,
+                "target2": target2,
+                "partial_booked": False,
+                "initial_quantity": qty,
                 "direction": direction,
                 "entry_price": entry_price,
                 "entry_time": datetime.datetime.now(),
@@ -387,6 +408,99 @@ class TradingEngine:
                         if ltp == 0:
                             continue
 
+                        current_qty = abs(p["quantity"])
+                        if current_qty == 0:
+                            continue
+
+                        risk_config = config_manager.get_risk_config()
+                        partial_enabled = bool(
+                            risk_config.get("partialBookingEnabled", True)
+                        )
+
+                        # ── Check Target 1 (Partial Profit Booking) ───────────
+                        if (
+                            partial_enabled
+                            and not trade.get("partial_booked", False)
+                            and trade.get("target1")
+                            and trade.get("target1") != trade.get("target2")
+                            and current_qty >= 2
+                        ):
+                            hit_target1 = False
+                            if trade["direction"] == "BUY":
+                                if ltp >= trade["target1"]:
+                                    hit_target1 = True
+                            else:
+                                if ltp <= trade["target1"]:
+                                    hit_target1 = True
+
+                            if hit_target1:
+                                ratio = float(
+                                    risk_config.get("partialBookingRatio", 0.5)
+                                )
+                                exit_qty = max(1, int(current_qty * ratio))
+                                min_profit = float(
+                                    risk_config.get("partialBookingMinProfit", 250.0)
+                                )
+                                expected_gain = (
+                                    abs(ltp - trade["entry_price"]) * exit_qty
+                                )
+
+                                # Brokerage safeguard: only split if expected gain justifies extra order fee
+                                if (
+                                    expected_gain >= min_profit
+                                    and (current_qty - exit_qty) >= 1
+                                ):
+                                    tx_type = "SELL" if p["quantity"] > 0 else "BUY"
+                                    smart_api_client.place_order(
+                                        variety="NORMAL",
+                                        exchange=p["exchange"],
+                                        tradingsymbol=symbol,
+                                        transaction_type=tx_type,
+                                        quantity=exit_qty,
+                                        product=p.get("product", "INTRADAY"),
+                                        order_type="LIMIT",
+                                        price=self._get_exit_limit_price(ltp, tx_type),
+                                    )
+
+                                    # Move SL to Breakeven on remaining runner shares
+                                    old_sl = trade["sl"]
+                                    trade["sl"] = trade["entry_price"]
+                                    trade["partial_booked"] = True
+                                    trade["target"] = trade.get(
+                                        "target2", trade["target"]
+                                    )
+
+                                    self._push_log(
+                                        f"🎯 PARTIAL TARGET 1 HIT for {symbol}: Booked {exit_qty} shares at ₹{ltp:.2f} "
+                                        f"(+₹{expected_gain:.2f}). Moved SL from ₹{old_sl:.2f} to Breakeven @ ₹{trade['entry_price']:.2f}. "
+                                        f"{current_qty - exit_qty} runner shares targeting ₹{trade['target']:.2f}."
+                                    )
+
+                                    try:
+                                        notifier.notify_trade_exit(
+                                            {
+                                                "tradingsymbol": symbol,
+                                                "direction": trade.get(
+                                                    "direction", "BUY"
+                                                ),
+                                                "entryPrice": trade["entry_price"],
+                                                "exitPrice": ltp,
+                                                "quantity": exit_qty,
+                                                "pnl": round(expected_gain, 2),
+                                                "pnlPercent": round(
+                                                    abs(ltp - trade["entry_price"])
+                                                    / trade["entry_price"]
+                                                    * 100,
+                                                    2,
+                                                ),
+                                                "exitReason": "PARTIAL_TARGET",
+                                                "mode": f"Live Trading ({self.mode.capitalize()})",
+                                            }
+                                        )
+                                    except Exception:
+                                        pass
+                                    continue
+
                         hit_sl = False
                         hit_target = False
 
@@ -402,7 +516,11 @@ class TradingEngine:
                                 hit_target = True
 
                         if hit_sl or hit_target:
-                            reason = "Stop Loss" if hit_sl else "Target"
+                            reason = (
+                                "Breakeven Stop Loss"
+                                if (hit_sl and trade.get("partial_booked", False))
+                                else ("Stop Loss" if hit_sl else "Target")
+                            )
                             self._push_log(
                                 f"{reason} hit for {symbol} at {ltp}. Exiting position."
                             )

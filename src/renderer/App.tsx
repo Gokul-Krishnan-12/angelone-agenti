@@ -10,6 +10,7 @@ import Watchlist from './pages/Watchlist';
 import SwingScreener from './pages/SwingScreener';
 import ActivityLog from './pages/ActivityLog';
 import Settings from './pages/Settings';
+import SystemGuide from './pages/SystemGuide';
 import LoginModal from './components/LoginModal';
 import { useTradingStore } from './stores/trading-store';
 import { useSmartAPI } from './hooks/useSmartAPI';
@@ -32,6 +33,7 @@ const App: React.FC = () => {
             <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/swing-screener" element={<SwingScreener />} />
             <Route path="/activity" element={<ActivityLog />} />
+            <Route path="/guide" element={<SystemGuide />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
           {!auth.isLoggedIn && <LoginModal />}

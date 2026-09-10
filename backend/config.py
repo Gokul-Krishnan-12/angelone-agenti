@@ -36,6 +36,11 @@ class ConfigManager:
                 "trailingSlEnabled": True,  # enable ATR trailing SL
                 "trailingSlAtrMultiplier": 2.0,  # trail 2.0 × ATR behind high-water mark
                 "trailingSlProfitCushionR": 1.0,  # trail only after reaching +1.0R profit
+                # ── Partial Profit Booking ────────────────────────
+                "partialBookingEnabled": True,  # book 50% at Target 1 and move SL to breakeven
+                "partialBookingRatio": 0.5,  # 50% quantity exit at Target 1
+                "partialBookingMinProfit": 250.0,  # minimum ₹250 gain to justify extra ₹20 brokerage order
+                "partialBookingTargetRR": 2.0,  # default Target 1 at 1:2 R:R
             },
             "strategies": {
                 # ── Top strategies for high-momentum F&O trading ──
