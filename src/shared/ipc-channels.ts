@@ -79,3 +79,7 @@ export const DASHBOARD_SUMMARY = 'dashboard:summary';
 // ─── Swing Screener ───────────────────────────────────────────────
 export const SWING_SCREENER_SCAN = 'swing:scan';
 export const SWING_SCREENER_GET_LAST = 'swing:get-last';
+
+// ─── Paper Trading ────────────────────────────────────────────────
+export const PAPER_TRADE_GET_STATUS = 'paper-trade:get-status';
+export const PAPER_TRADE_SET_STATUS = 'paper-trade:set-status';

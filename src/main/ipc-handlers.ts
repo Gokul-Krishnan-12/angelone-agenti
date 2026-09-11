@@ -201,4 +201,17 @@ export function setupIpcHandlers() {
   ipcMain.handle(channels.SWING_SCREENER_GET_LAST, async () => {
     return await pythonBridge.call('get_last_swing_scan');
   });
+
+  // ─── Paper Trading ────────────────────────────────────────────────
+
+  let isPaperTradingRunning = false;
+
+  ipcMain.handle(channels.PAPER_TRADE_GET_STATUS, async () => {
+    return isPaperTradingRunning;
+  });
+
+  ipcMain.handle(channels.PAPER_TRADE_SET_STATUS, async (_, running: boolean) => {
+    isPaperTradingRunning = Boolean(running);
+    return isPaperTradingRunning;
+  });
 }

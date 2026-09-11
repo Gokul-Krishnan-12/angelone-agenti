@@ -106,6 +106,10 @@ try {
       scan: (params?: any) => electron.ipcRenderer.invoke(channels.SWING_SCREENER_SCAN, params),
       getLast: () => electron.ipcRenderer.invoke(channels.SWING_SCREENER_GET_LAST),
     },
+    paperTrade: {
+      getStatus: () => electron.ipcRenderer.invoke(channels.PAPER_TRADE_GET_STATUS),
+      setStatus: (running: boolean) => electron.ipcRenderer.invoke(channels.PAPER_TRADE_SET_STATUS, running),
+    },
     app: {
       onPythonStatus: (callback: (data: any) => void) => {
         const listener = (_: any, data: any) => callback(data);

@@ -31,7 +31,8 @@ const PaperTrade: React.FC = () => {
   const orders = usePaperTradingStore((s) => s.orders);
   const activityLog = usePaperTradingStore((s) => s.activityLog);
   const maxCapitalPerTrade = usePaperTradingStore((s) => s.maxCapitalPerTrade);
-  const maxDailyTrades = usePaperTradingStore((s) => s.maxDailyTrades) || 10;
+  const maxDailyTrades = usePaperTradingStore((s) => s.maxDailyTrades) || 8;
+  const rejectedTrades = usePaperTradingStore((s) => s.rejectedTrades) || [];
   const setMaxDailyTrades = usePaperTradingStore((s) => s.setMaxDailyTrades);
   const setIsRunning = usePaperTradingStore((s) => s.setIsRunning);
   const setDummyBalance = usePaperTradingStore((s) => s.setDummyBalance);
@@ -40,18 +41,21 @@ const PaperTrade: React.FC = () => {
   const manualSquareOff = usePaperTradingStore((s) => s.manualSquareOff);
   const clearLogs = usePaperTradingStore((s) => s.clearLogs);
   const clearOrders = usePaperTradingStore((s) => s.clearOrders);
+  const clearRejectedTrades = usePaperTradingStore((s) => s.clearRejectedTrades);
   const repairOrders = usePaperTradingStore((s) => s.repairOrders);
   const autoSquareOffIntraday = usePaperTradingStore((s) => s.autoSquareOffIntraday);
+  const syncRunningStatus = usePaperTradingStore((s) => s.syncRunningStatus);
 
   useEffect(() => {
     repairOrders();
     autoSquareOffIntraday();
-  }, [repairOrders, autoSquareOffIntraday]);
+    syncRunningStatus();
+  }, [repairOrders, autoSquareOffIntraday, syncRunningStatus]);
 
   const [customBalanceInput, setCustomBalanceInput] = useState<string>('');
   const [customMaxTradesInput, setCustomMaxTradesInput] = useState<string>('');
   const [showBalanceModal, setShowBalanceModal] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'logs'>('positions');
+  const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'rejected' | 'logs'>('positions');
 
   // Compute metrics
   const totalMarginUsed = positions.reduce((acc, p) => acc + p.marginUsed, 0);
@@ -311,6 +315,23 @@ const PaperTrade: React.FC = () => {
             </button>
 
             <button
+              onClick={() => setActiveTab('rejected')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'rejected'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                  : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+              }`}
+            >
+              <ShieldAlert size={14} />
+              <span>Rejected Setups</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                rejectedTrades.length > 0 ? 'bg-amber-500/30 text-amber-200' : 'bg-surface-700 text-surface-400'
+              }`}>
+                {rejectedTrades.length}
+              </span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('logs')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'logs'
@@ -318,7 +339,7 @@ const PaperTrade: React.FC = () => {
                   : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
               }`}
             >
-              <span>Paper Activity Log</span>
+              <span>Sandbox Activity Logs</span>
               <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-surface-700 text-surface-200">
                 {activityLog.length}
               </span>
@@ -535,7 +556,79 @@ const PaperTrade: React.FC = () => {
           </div>
         )}
 
-        {/* Tab 3: Paper Activity Log */}
+        {/* Tab 3: Rejected Setups */}
+        {activeTab === 'rejected' && (
+          <div className="flex-1 overflow-auto">
+            {rejectedTrades.length === 0 ? (
+              <div className="py-24 text-center">
+                <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-surface-750 border border-surface-700 flex items-center justify-center text-surface-400">
+                  <CheckCircle2 size={28} className="text-profit-light" />
+                </div>
+                <h3 className="text-base font-bold text-white mb-1">No Rejected Setups</h3>
+                <p className="text-xs text-surface-400 max-w-md mx-auto">
+                  When breakout signals arrive and are filtered out by safety gates (confluence score &lt; 3, counter-trend against 50 EMA, market hours, daily caps), they will appear here with exact reasons.
+                </p>
+              </div>
+            ) : (
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-surface-700/80 text-surface-400 uppercase text-[10px] tracking-wider bg-surface-900/40">
+                    <th className="px-5 py-3 font-semibold">Time</th>
+                    <th className="px-5 py-3 font-semibold">Symbol</th>
+                    <th className="px-5 py-3 font-semibold">Side</th>
+                    <th className="px-5 py-3 font-semibold">Strategy</th>
+                    <th className="px-5 py-3 font-semibold">Conf / Confluence</th>
+                    <th className="px-5 py-3 font-semibold">Price</th>
+                    <th className="px-5 py-3 font-semibold">Rejection Reason</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface-700/40">
+                  {rejectedTrades.map((r) => (
+                    <tr key={r.id} className="hover:bg-surface-750/30 transition-colors">
+                      <td className="px-5 py-3 text-surface-400 font-mono text-[11px]">
+                        {new Date(r.timestamp).toLocaleTimeString()}
+                      </td>
+                      <td className="px-5 py-3 font-bold text-white tracking-wide">
+                        {r.tradingsymbol}
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          r.direction === 'BUY'
+                            ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
+                            : 'bg-loss-dark/20 text-loss-light border border-loss/30'
+                        }`}>
+                          {r.direction}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-surface-300 font-medium">
+                        {r.strategy.replace(/_/g, ' ')}
+                      </td>
+                      <td className="px-5 py-3 font-mono text-surface-300">
+                        <span className="text-white font-bold">{r.confidence}%</span>
+                        {r.confluenceScore !== undefined && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.2 rounded bg-surface-700 text-surface-300">
+                            Score: {r.confluenceScore}/3
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 font-mono text-surface-200">
+                        {r.price > 0 ? `₹${r.price.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-loss-dark/15 text-loss-light border border-loss/25">
+                          <XCircle size={12} className="shrink-0" />
+                          <span>{r.reason}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Tab 4: Paper Activity Log */}
         {activeTab === 'logs' && (
           <div className="p-4 flex-1 overflow-auto space-y-2 font-mono text-xs">
             {activityLog.length === 0 ? (
@@ -590,14 +683,19 @@ const PaperTrade: React.FC = () => {
 
             {/* Presets */}
             <div className="grid grid-cols-2 gap-2">
-              {[50000, 100000, 200000, 500000].map((amt) => (
+              {[20000, 50000, 100000, 200000].map((amt) => (
                 <button
                   key={amt}
                   type="button"
-                  onClick={() => setPresetBalance(amt)}
+                  onClick={() => {
+                    setPresetBalance(amt);
+                    if (amt === 20000) {
+                      setMaxCapitalPerTrade(4000); // 20% position sizing for 20k
+                    }
+                  }}
                   className="py-2 px-3 rounded-xl bg-surface-800 hover:bg-surface-700 border border-surface-700 text-white font-mono text-xs font-semibold transition-colors text-center"
                 >
-                  ₹{amt.toLocaleString('en-IN')}
+                  ₹{amt.toLocaleString('en-IN')} {amt === 20000 ? '(20k Budget)' : ''}
                 </button>
               ))}
             </div>

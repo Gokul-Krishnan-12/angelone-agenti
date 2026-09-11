@@ -335,6 +335,8 @@ class Scanner:
 
             df, was_cached = self._fetch_candles(token, symbol)
             if df.empty:
+                if not was_cached:
+                    time.sleep(0.4)
                 return []
 
             # ── 15:15 Intraday Cutoff Gate ────────────────────────────

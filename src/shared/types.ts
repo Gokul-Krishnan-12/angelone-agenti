@@ -465,6 +465,10 @@ export interface ElectronAPI {
     scan: (params?: { limit?: number }) => Promise<SwingScanResult>;
     getLast: () => Promise<SwingScanResult | null>;
   };
+  paperTrade: {
+    getStatus: () => Promise<boolean>;
+    setStatus: (running: boolean) => Promise<boolean>;
+  };
   app: {
     onPythonStatus: (callback: (data: any) => void) => () => void;
     onError: (callback: (data: any) => void) => () => void;

@@ -15,15 +15,15 @@ class ConfigManager:
 
         self.default_config = {
             "risk": {
-                "maxCapitalPerTrade": 10000,
-                "maxDailyLoss": 2000,
-                "maxSimultaneousPositions": 5,
-                "maxDailyTrades": 10,
+                "maxCapitalPerTrade": 4000,
+                "maxDailyLoss": 800,
+                "maxSimultaneousPositions": 4,
+                "maxDailyTrades": 8,
                 "noNewTradesAfter": "15:00",
                 "autoSquareOff": True,
                 "squareOffTime": "15:15",
-                "defaultStopLossPercent": 1.5,
-                "defaultTargetPercent": 3,
+                "defaultStopLossPercent": 1.2,
+                "defaultTargetPercent": 2.5,
                 "positionRevalWeakExitMins": 15,
                 "positionRevalBreakevenMins": 45,
                 # ── Quality filters ──────────────────────────────────

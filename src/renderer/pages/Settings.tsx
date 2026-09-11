@@ -71,7 +71,14 @@ const Settings: React.FC = () => {
     setLocalSettings((prev: any) => {
       let finalValue = value;
       if (typeof value === 'string' && !value.includes(':')) {
-        finalValue = parseFloat(value) || 0;
+        if (value === '') {
+          finalValue = '';
+        } else if (value.endsWith('.')) {
+          finalValue = value;
+        } else {
+          const parsed = parseFloat(value);
+          finalValue = isNaN(parsed) ? value : parsed;
+        }
       }
       return {
         ...prev,
@@ -87,9 +94,28 @@ const Settings: React.FC = () => {
     try {
       setIsSaving(true);
       setSaveStatus('Saving changes...');
-      // Optimistically update memory store immediately
-      setSettings(localSettings);
-      await window.electronAPI?.invoke(SETTINGS_SAVE, localSettings);
+      // Clean up stringified numbers before saving
+      const cleanedRisk = { ...localSettings.risk };
+      const numericKeys = [
+        'maxCapitalPerTrade',
+        'maxDailyLoss',
+        'maxSimultaneousPositions',
+        'maxDailyTrades',
+        'defaultStopLossPercent',
+        'defaultTargetPercent'
+      ];
+      numericKeys.forEach((k) => {
+        if (cleanedRisk[k] !== undefined && cleanedRisk[k] !== '') {
+          cleanedRisk[k] = parseFloat(cleanedRisk[k]) || 0;
+        }
+      });
+      const settingsToSave = {
+        ...localSettings,
+        risk: cleanedRisk
+      };
+      setLocalSettings(settingsToSave);
+      setSettings(settingsToSave);
+      await window.electronAPI?.invoke(SETTINGS_SAVE, settingsToSave);
       setSaveStatus('Saved successfully!');
       setTimeout(() => setSaveStatus(''), 3000);
     } catch (error) {
@@ -105,21 +131,21 @@ const Settings: React.FC = () => {
       ...prev,
       risk: {
         ...prev.risk,
-        maxCapitalPerTrade: 10000,
-        maxDailyLoss: 2000,
-        maxSimultaneousPositions: 5,
-        maxDailyTrades: 10,
+        maxCapitalPerTrade: 4000,
+        maxDailyLoss: 800,
+        maxSimultaneousPositions: 4,
+        maxDailyTrades: 8,
         autoSquareOff: true,
         squareOffTime: "15:15",
-        defaultStopLossPercent: 1.5,
-        defaultTargetPercent: 3
+        defaultStopLossPercent: 1.2,
+        defaultTargetPercent: 2.5
       }
     }));
   };
 
-  const slPct = Number(localSettings.risk?.defaultStopLossPercent) || 1.5;
-  const tgtPct = Number(localSettings.risk?.defaultTargetPercent) || 3.0;
-  const maxCap = Number(localSettings.risk?.maxCapitalPerTrade) || 10000;
+  const slPct = Number(localSettings.risk?.defaultStopLossPercent) || 1.2;
+  const tgtPct = Number(localSettings.risk?.defaultTargetPercent) || 2.5;
+  const maxCap = Number(localSettings.risk?.maxCapitalPerTrade) || 4000;
   const rrRatio = slPct > 0 ? (tgtPct / slPct).toFixed(1) : '0';
   const exampleEntry = 1000;
   const exampleTarget = (exampleEntry * (1 + tgtPct / 100)).toFixed(2);
@@ -194,6 +220,13 @@ const Settings: React.FC = () => {
               </div>
             </div>
 
+            <div className="mb-4 p-3 rounded-xl bg-accent/10 border border-accent/20 text-xs text-surface-300 flex items-center gap-2.5">
+              <Sparkles size={16} className="text-accent-light shrink-0" />
+              <span>
+                <strong>20% Sizing Rule:</strong> ₹4,000 margin/trade is calibrated for a ₹20,000 account, holding up to 4 concurrent positions with 5x MIS leverage (₹20,000 exposure each) and a 20% cash reserve.
+              </span>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {/* Max Capital Per Trade */}
               <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
@@ -203,10 +236,10 @@ const Settings: React.FC = () => {
                 </div>
                 <input 
                   type="number" 
-                  value={localSettings.risk?.maxCapitalPerTrade || ''} 
+                  value={localSettings.risk?.maxCapitalPerTrade ?? ''} 
                   onChange={(e) => handleRiskChange('maxCapitalPerTrade', e.target.value)}
                   className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
-                  placeholder="10000"
+                  placeholder="4000"
                 />
                 <div className="p-2 rounded bg-surface-800/80 border border-surface-700/60 text-[11px] text-surface-400 flex items-start gap-1.5">
                   <Sparkles size={14} className="text-accent-light mt-0.5 shrink-0" />
@@ -224,13 +257,13 @@ const Settings: React.FC = () => {
                 </div>
                 <input 
                   type="number" 
-                  value={localSettings.risk?.maxDailyLoss || ''} 
+                  value={localSettings.risk?.maxDailyLoss ?? ''} 
                   onChange={(e) => handleRiskChange('maxDailyLoss', e.target.value)}
                   className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
-                  placeholder="2000"
+                  placeholder="800"
                 />
                 <p className="text-[11px] text-surface-500">
-                  Agent halts all new trades and protects capital immediately if daily losses reach this threshold.
+                  Agent halts all new trades and protects capital immediately if daily losses reach this threshold (4% drawdown limit).
                 </p>
               </div>
 
@@ -239,28 +272,28 @@ const Settings: React.FC = () => {
                 <label className="block text-surface-300 text-xs font-semibold">Max Simultaneous Positions</label>
                 <input 
                   type="number" 
-                  value={localSettings.risk?.maxSimultaneousPositions || ''} 
+                  value={localSettings.risk?.maxSimultaneousPositions ?? ''} 
                   onChange={(e) => handleRiskChange('maxSimultaneousPositions', e.target.value)}
                   className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
-                  placeholder="5"
+                  placeholder="4"
                 />
                 <p className="text-[11px] text-surface-500">
-                  Caps concurrent open positions to prevent over-diversification and excessive margin drawdown.
+                  Caps concurrent open positions to prevent over-diversification and excessive margin drawdown (max 4 positions × 20% = 80%).
                 </p>
               </div>
 
               {/* Max Daily Trades */}
               <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
-                <label className="block text-surface-300 text-xs font-semibold">Max Trades Per Day (8–10)</label>
+                <label className="block text-surface-300 text-xs font-semibold">Max Trades Per Day (6–8)</label>
                 <input 
                   type="number" 
-                  value={localSettings.risk?.maxDailyTrades || ''} 
+                  value={localSettings.risk?.maxDailyTrades ?? ''} 
                   onChange={(e) => handleRiskChange('maxDailyTrades', e.target.value)}
                   className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
-                  placeholder="10"
+                  placeholder="8"
                 />
                 <p className="text-[11px] text-surface-500">
-                  Caps total executed trades per day (8–10 recommended) to eliminate overtrading and brokerage fee drain.
+                  Caps total executed trades per day (6–8 recommended) to eliminate overtrading and brokerage fee drain.
                 </p>
               </div>
 
@@ -302,10 +335,10 @@ const Settings: React.FC = () => {
                 <input 
                   type="number" 
                   step="0.1"
-                  value={localSettings.risk?.defaultStopLossPercent || ''} 
+                  value={localSettings.risk?.defaultStopLossPercent ?? ''} 
                   onChange={(e) => handleRiskChange('defaultStopLossPercent', e.target.value)}
                   className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
-                  placeholder="1.5"
+                  placeholder="1.2"
                 />
                 <p className="text-[11px] text-surface-500">
                   Fixed distance below entry price for automatic protective stop loss orders.
@@ -321,10 +354,10 @@ const Settings: React.FC = () => {
                 <input 
                   type="number" 
                   step="0.1"
-                  value={localSettings.risk?.defaultTargetPercent || ''} 
+                  value={localSettings.risk?.defaultTargetPercent ?? ''} 
                   onChange={(e) => handleRiskChange('defaultTargetPercent', e.target.value)}
                   className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
-                  placeholder="3.0"
+                  placeholder="2.5"
                 />
                 <p className="text-[11px] text-surface-500">
                   Target exit price for capturing gains when price swings in trade direction.

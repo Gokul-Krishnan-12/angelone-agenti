@@ -39,6 +39,18 @@ export interface PaperOrder {
   exitTime?: string;
 }
 
+export interface PaperRejectedTrade {
+  id: string;
+  tradingsymbol: string;
+  direction: 'BUY' | 'SELL';
+  strategy: string;
+  confidence: number;
+  confluenceScore?: number;
+  price: number;
+  reason: string;
+  timestamp: string;
+}
+
 export interface PaperLogEntry {
   id: string;
   timestamp: string;
@@ -52,6 +64,7 @@ interface PaperTradingState {
   isRunning: boolean;
   positions: PaperPosition[];
   orders: PaperOrder[];
+  rejectedTrades: PaperRejectedTrade[];
   activityLog: PaperLogEntry[];
   maxCapitalPerTrade: number;
   maxDailyTrades: number;
@@ -70,6 +83,8 @@ interface PaperTradingState {
   clearOrders: () => void;
   repairOrders: () => void;
   clearLogs: () => void;
+  clearRejectedTrades: () => void;
+  syncRunningStatus: () => Promise<void>;
   addLog: (type: PaperLogEntry['type'], message: string) => void;
 }
 
@@ -99,6 +114,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       isRunning: false,
       positions: [],
       orders: [],
+      rejectedTrades: [],
       lastPaperSummaryDate: null,
       activityLog: [
         {
@@ -108,8 +124,8 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           message: 'Paper Trading sandbox initialized. Real-market simulation with zero financial risk.'
         }
       ],
-      maxCapitalPerTrade: 20000,
-      maxDailyTrades: 10,
+      maxCapitalPerTrade: 4000,
+      maxDailyTrades: 8,
 
       setDummyBalance: (amount: number) => {
         const valid = Math.max(1000, Number(amount) || 100000);
@@ -119,6 +135,9 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 
       setIsRunning: (running: boolean) => {
         set({ isRunning: running });
+        if (window.electronAPI?.paperTrade?.setStatus) {
+          window.electronAPI.paperTrade.setStatus(running).catch(() => {});
+        }
         get().addLog(
           'INFO',
           running
@@ -127,12 +146,23 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         );
       },
 
+      syncRunningStatus: async () => {
+        try {
+          if (window.electronAPI?.paperTrade?.getStatus) {
+            const status = await window.electronAPI.paperTrade.getStatus();
+            set({ isRunning: Boolean(status) });
+          }
+        } catch {
+          // ignore
+        }
+      },
+
       setMaxCapitalPerTrade: (amount: number) => {
-        set({ maxCapitalPerTrade: Math.max(1000, Number(amount) || 20000) });
+        set({ maxCapitalPerTrade: Math.max(1000, Number(amount) || 4000) });
       },
 
       setMaxDailyTrades: (amount: number) => {
-        set({ maxDailyTrades: Math.max(1, Math.min(50, Number(amount) || 10)) });
+        set({ maxDailyTrades: Math.max(1, Math.min(50, Number(amount) || 8)) });
       },
 
       resetAccount: (newCapital?: number) => {
@@ -142,6 +172,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           initialCapital: capital,
           positions: [],
           orders: [],
+          rejectedTrades: [],
           activityLog: [
             {
               id: `reset-${Date.now()}`,
@@ -167,22 +198,46 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 
       clearLogs: () => set({ activityLog: [] }),
 
+      clearRejectedTrades: () => set({ rejectedTrades: [] }),
+
       executePaperTradeFromSignal: (signal: Signal) => {
         const state = get();
-        if (!state.isRunning) return false;
+        const cleanSymbol = (signal.tradingsymbol || 'UNKNOWN').replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
+        const entryPrice = Number(signal.entryPrice || (signal as any).price || 0);
+
+        const recordRejection = (reason: string) => {
+          const rejectedItem: PaperRejectedTrade = {
+            id: `rej-${Date.now()}-${cleanSymbol}-${Math.random().toString(36).substring(2, 6)}`,
+            tradingsymbol: cleanSymbol,
+            direction: signal.direction === 'SELL' ? 'SELL' : 'BUY',
+            strategy: signal.strategy || 'Multi-Strategy',
+            confidence: Number(signal.confidence || 0),
+            confluenceScore: Number(signal.confluenceScore || 0),
+            price: entryPrice,
+            reason,
+            timestamp: new Date().toISOString()
+          };
+          set((s) => ({
+            rejectedTrades: [rejectedItem, ...s.rejectedTrades].slice(0, 150)
+          }));
+          get().addLog('SIGNAL', `❌ Trade rejected for ${cleanSymbol}: ${reason}`);
+        };
+
+        if (!state.isRunning) {
+          recordRejection('Simulation Paused (Start Paper Trading to execute)');
+          return false;
+        }
 
         // Gate simulated paper executions: No intraday trades before 09:15 or after 15:15 IST (Mon-Fri)
         if (!isIndianMarketHours()) {
-          get().addLog(
-            'INFO',
-            `Intraday cutoff reached (Trading window: 09:15–15:15 IST, Mon–Fri). Skipped virtual trade for ${signal.tradingsymbol}.`
-          );
+          recordRejection('Outside Trading Window (Active 09:15–15:15 IST, Mon–Fri)');
           return false;
         }
 
         // High quality filter: require minimum confluence score of 3 independent families
         const confluenceScore = Number(signal.confluenceScore || 1);
         if (confluenceScore < 3) {
+          recordRejection(`Confluence Too Low (${confluenceScore}/3 independent families required)`);
           return false;
         }
 
@@ -192,19 +247,18 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         );
 
         // Daily trade cap (8 to 10 trades per day to prevent overtrading and brokerage drain)
-        const maxDailyTrades = state.maxDailyTrades || 10;
+        const maxDailyTrades = state.maxDailyTrades || 8;
         if (todayOrders.length >= maxDailyTrades) {
-          get().addLog('INFO', `Max daily trade cap reached (${todayOrders.length}/${maxDailyTrades} trades today). Preserving capital.`);
+          recordRejection(`Max Daily Trade Cap Reached (${todayOrders.length}/${maxDailyTrades} trades)`);
           return false;
         }
-
-        const cleanSymbol = signal.tradingsymbol.replace('-EQ', '');
 
         // Anti-whipsaw cooldown: Max 1 trade per symbol per day
         const alreadyTradedToday = todayOrders.some(
           (o) => o.tradingsymbol === cleanSymbol || o.tradingsymbol === signal.tradingsymbol
         );
         if (alreadyTradedToday) {
+          recordRejection('Symbol Cooldown: Max 1 trade per symbol per day');
           return false;
         }
 
@@ -212,16 +266,21 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         const alreadyOpen = state.positions.some(
           (p) => p.tradingsymbol === cleanSymbol || p.tradingsymbol === signal.tradingsymbol
         );
-        if (alreadyOpen) return false;
+        if (alreadyOpen) {
+          recordRejection('Position Already Open for this symbol');
+          return false;
+        }
 
-        const entryPrice = signal.entryPrice || 100;
-        if (entryPrice <= 0) return false;
+        if (entryPrice <= 0) {
+          recordRejection('Invalid Entry Price');
+          return false;
+        }
 
         // Position sizing: With 5x intraday leverage (20% margin)
         // Position value = margin * 5 -> quantity = (margin * 5) / price
         const marginToUse = Math.min(state.maxCapitalPerTrade, state.dummyBalance);
         if (marginToUse < 500) {
-          get().addLog('INFO', `Insufficient paper balance to take trade on ${signal.tradingsymbol}`);
+          recordRejection(`Insufficient Balance: ₹${state.dummyBalance.toLocaleString('en-IN')} available (min ₹500 required)`);
           return false;
         }
 
@@ -229,7 +288,10 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         const quantity = Math.max(1, Math.floor(effectiveExposure / entryPrice));
         const actualMarginUsed = (quantity * entryPrice) / 5;
 
-        if (actualMarginUsed > state.dummyBalance) return false;
+        if (actualMarginUsed > state.dummyBalance) {
+          recordRejection(`Required Margin (₹${Math.round(actualMarginUsed).toLocaleString('en-IN')}) exceeds available balance`);
+          return false;
+        }
 
         const posId = `paper-pos-${Date.now()}-${cleanSymbol}`;
         const orderId = `paper-ord-${Date.now()}-${cleanSymbol}`;
@@ -686,14 +748,23 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         initialCapital: state.initialCapital,
         positions: state.positions,
         orders: state.orders,
+        rejectedTrades: state.rejectedTrades,
         activityLog: state.activityLog,
         maxCapitalPerTrade: state.maxCapitalPerTrade,
         lastPaperSummaryDate: state.lastPaperSummaryDate
-        // isRunning is intentionally excluded so paper trading NEVER auto-starts on app launch
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
-          state.isRunning = false; // Always ensure stopped on app startup / reload
+          // Sync running status with Electron main process so state survives page reloads
+          if (window.electronAPI?.paperTrade?.getStatus) {
+            window.electronAPI.paperTrade.getStatus().then((running) => {
+              state.isRunning = Boolean(running);
+            }).catch(() => {
+              state.isRunning = false;
+            });
+          } else {
+            state.isRunning = false;
+          }
           if (Array.isArray(state.orders)) {
             state.orders = state.orders.map(sanitizePaperOrder);
           }
