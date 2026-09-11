@@ -20,7 +20,13 @@ class TestCalculateStopLoss:
 
     def test_uses_config_default_when_percentage_missing(self, strategy):
         # Default defaultStopLossPercent is 1.5 -> 1.5% below entry for a BUY.
-        assert strategy.calculate_stop_loss(200.0, "BUY") == 197.0
+        from unittest.mock import patch
+
+        with patch(
+            "backend.config.config_manager.get_risk_config",
+            return_value={"defaultStopLossPercent": 1.5},
+        ):
+            assert strategy.calculate_stop_loss(200.0, "BUY") == 197.0
 
 
 class TestCalculateTarget:

@@ -5,6 +5,7 @@ import traceback
 from .config import config_manager
 from .scanner import scanner
 from .smartapi_client import smart_api_client
+from .telegram_bot import telegram_bot
 from .ticker import ticker_manager
 from .trading_engine import trading_engine
 from .utils import DateTimeEncoder
@@ -315,6 +316,7 @@ def handle_request(req):
         elif method == "save_settings":
             config_manager.config.update(params)
             config_manager.save()
+            telegram_bot.restart()
             return success({"status": "saved"})
 
         elif method == "settings_reset":
@@ -323,6 +325,7 @@ def handle_request(req):
                 "strategies"
             ].copy()
             config_manager.save()
+            telegram_bot.restart()
             return success(config_manager.config)
 
         elif method in ("scan_now", "agent_scan_now"):
@@ -452,6 +455,17 @@ def handle_request(req):
             notifier.notify_session_summary(summary)
             return success({"status": "queued"})
 
+        elif method == "telegram_bot_status":
+            return success({"running": telegram_bot.is_running()})
+
+        elif method == "telegram_bot_start":
+            res = telegram_bot.start()
+            return success({"started": res, "running": telegram_bot.is_running()})
+
+        elif method == "telegram_bot_stop":
+            telegram_bot.stop()
+            return success({"stopped": True, "running": False})
+
         elif method == "swing_scan":
             from .swing_screener import swing_screener
 
@@ -472,6 +486,11 @@ def handle_request(req):
 
 
 def main():
+    try:
+        telegram_bot.start()
+    except Exception:
+        pass
+
     for line in sys.stdin:
         line = line.strip()
         if not line:

@@ -20,7 +20,12 @@ import {
   TrendingUp,
   Sparkles,
   Lock,
-  Flame
+  Flame,
+  Send,
+  Smartphone,
+  ShieldAlert,
+  Terminal,
+  Radio
 } from 'lucide-react';
 
 interface StrategyItem {
@@ -259,7 +264,7 @@ const STRATEGIES_LIST: StrategyItem[] = [
 ];
 
 const SystemGuide: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'architecture' | 'strategies' | 'confluence' | 'partial_booking' | 'paper_vs_live'>('architecture');
+  const [activeTab, setActiveTab] = useState<'architecture' | 'strategies' | 'confluence' | 'partial_booking' | 'paper_vs_live' | 'telegram_control'>('architecture');
   const [strategyFilter, setStrategyFilter] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -328,7 +333,8 @@ const SystemGuide: React.FC = () => {
             { id: 'strategies', label: '20+ TA Strategies', icon: <Compass size={15} /> },
             { id: 'confluence', label: 'Confluence & Dynamic R:R', icon: <Layers size={15} /> },
             { id: 'partial_booking', label: 'Partial Profit Booking', icon: <Split size={15} /> },
-            { id: 'paper_vs_live', label: 'Paper vs Live Mode', icon: <ShieldCheck size={15} /> }
+            { id: 'paper_vs_live', label: 'Paper vs Live Mode', icon: <ShieldCheck size={15} /> },
+            { id: 'telegram_control', label: 'Telegram Remote Control', icon: <Send size={15} /> }
           ].map(tab => (
             <button
               key={tab.id}
@@ -1030,6 +1036,184 @@ const SystemGuide: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 6: Telegram 2-Way Remote Control */}
+      {activeTab === 'telegram_control' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Card */}
+          <div className="bg-surface-800/90 border border-surface-700/80 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+            <div className="absolute -right-10 -bottom-10 w-72 h-72 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="p-2 bg-sky-500/15 text-sky-400 rounded-xl border border-sky-500/30">
+                    <Send size={20} />
+                  </span>
+                  <h2 className="text-xl font-bold text-white">2-Way Telegram Remote Control & Panic Switch</h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sky-500/15 text-sky-400 border border-sky-500/30">
+                    Interactive Bot
+                  </span>
+                </div>
+                <p className="text-sm text-surface-300 max-w-3xl leading-relaxed">
+                  Monitor your trading engine, check live unrealised P&L, inspect open positions, remotely start/stop market scanning, or trigger an instant emergency square-off directly from your smartphone.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 self-start md:self-auto">
+                <div className="px-3.5 py-2 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
+                  <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Protocol</span>
+                  <span className="text-xs font-bold text-sky-400 font-mono">getUpdates Long-Poll</span>
+                </div>
+                <div className="px-3.5 py-2 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
+                  <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Security</span>
+                  <span className="text-xs font-bold text-profit-light font-mono">Chat ID Locked</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Commands Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              {
+                cmd: '/status',
+                tag: 'Monitoring',
+                color: 'text-sky-400 bg-sky-500/10 border-sky-500/30',
+                desc: 'Returns live agent status (RUNNING/STOPPED), execution mode (AUTO/CONFIRM), count of active positions, today’s realised and unrealised P&L, win rate, and available equity margin.',
+                example: '🤖 AGENT STATUS\n⚡ Engine: 🟢 RUNNING (Mode: AUTO)\n📊 Active Positions: 2\n💰 Today P&L: +₹1,450.00'
+              },
+              {
+                cmd: '/positions',
+                tag: 'Portfolio',
+                color: 'text-accent-light bg-accent-DEFAULT/10 border-accent-DEFAULT/30',
+                desc: 'Fetches real-time open positions from Angel One SmartAPI, displaying stock symbol, direction (BUY/SELL), quantity, average entry price, LTP, and net P&L in rupees and percent.',
+                example: '📊 CURRENT OPEN POSITIONS\n🟢 RELIANCE (BUY × 15)\n  • Entry: ₹2,900 | LTP: ₹2,935\n  • P&L: +₹525.00 (+1.21%)'
+              },
+              {
+                cmd: '/squareoff',
+                tag: '🚨 Emergency Panic',
+                color: 'text-loss-light bg-loss-DEFAULT/15 border-loss-DEFAULT/40',
+                desc: 'Immediate emergency exit button. Cancels open tracking and sends market/exit limit orders to close all open intraday positions on Angel One, then halts the trading engine.',
+                example: '🚨 EMERGENCY SQUARE-OFF\n⚡ Closed: 2 positions squared off\n🛑 Engine: Stopped\n⏱ Executed At: 14:15:02 IST'
+              },
+              {
+                cmd: '/start auto',
+                tag: 'Execution',
+                color: 'text-profit-light bg-profit-DEFAULT/10 border-profit-DEFAULT/30',
+                desc: 'Remotely activates the trading engine in full automated execution mode. Scanner will auto-place broker orders whenever a signal with ≥85% confidence and ≥2 confluence families appears.',
+                example: '🚀 TRADING ENGINE STARTED\n🏷 Mode: AUTO\n🔍 Dynamic scanner & position monitoring active.'
+              },
+              {
+                cmd: '/start confirm',
+                tag: 'Safety',
+                color: 'text-warning-light bg-warning-DEFAULT/10 border-warning-DEFAULT/30',
+                desc: 'Activates the trading engine in confirmation mode. Signals are scanned and streamed to the desktop UI for your manual review without executing trades automatically.',
+                example: '🚀 TRADING ENGINE STARTED\n🏷 Mode: CONFIRM\n🛡 Signals will await confirmation in UI.'
+              },
+              {
+                cmd: '/stop',
+                tag: 'Control',
+                color: 'text-surface-300 bg-surface-700/30 border-surface-600/40',
+                desc: 'Pauses market scanning and halts new trade generation. Existing open positions remain live and will exit upon reaching Targets or End-Of-Day RMS square-off.',
+                example: '🛑 TRADING ENGINE STOPPED\nMarket scanning paused.\nExisting open positions remain live.'
+              }
+            ].map((card, i) => (
+              <div key={i} className="bg-surface-900/90 border border-surface-700/80 rounded-xl p-5 flex flex-col justify-between space-y-3 shadow-md hover:border-surface-600 transition-all">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-base font-mono font-bold text-white bg-surface-950 px-2.5 py-1 rounded-lg border border-surface-700">
+                      {card.cmd}
+                    </span>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${card.color}`}>
+                      {card.tag}
+                    </span>
+                  </div>
+                  <p className="text-xs text-surface-300 leading-relaxed">
+                    {card.desc}
+                  </p>
+                </div>
+
+                <div className="bg-surface-950/80 border border-surface-800 rounded-lg p-2.5 font-mono text-[11px] text-surface-400 whitespace-pre-line leading-snug">
+                  {card.example}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Critical Safeguards & Power Outage Architecture */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-surface-800/80 border border-surface-700/80 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center gap-2.5 text-profit-light font-bold text-base">
+                <ShieldAlert size={20} />
+                <span>Strict Security: Private Chat ID Authorization</span>
+              </div>
+              <p className="text-xs text-surface-300 leading-relaxed">
+                By default, Telegram bots can receive messages from anyone on the internet. To prevent unauthorized control over your trading capital, this application uses a <strong>strict cryptographic identity check</strong>:
+              </p>
+              <ul className="space-y-2 text-xs text-surface-300">
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 size={14} className="text-profit-light shrink-0 mt-0.5" />
+                  <span>Every inbound message is verified against your personal numeric <code>chatId</code> configured in Settings.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 size={14} className="text-profit-light shrink-0 mt-0.5" />
+                  <span>Messages from any other Telegram user are immediately rejected with an <em>Access Denied</em> alert.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 size={14} className="text-profit-light shrink-0 mt-0.5" />
+                  <span><strong>Zero Port Forwarding:</strong> The bot uses long-polling (<code>getUpdates</code>), so your machine never opens incoming firewall ports.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="bg-surface-800/80 border border-surface-700/80 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center gap-2.5 text-warning-light font-bold text-base">
+                <Radio size={20} />
+                <span>Power Outage & Network Failure Handling</span>
+              </div>
+              <p className="text-xs text-surface-300 leading-relaxed">
+                If your local PC loses electricity or internet connection while you are away:
+              </p>
+              <ul className="space-y-2 text-xs text-surface-300">
+                <li className="flex items-start gap-2">
+                  <AlertCircle size={14} className="text-warning-light shrink-0 mt-0.5" />
+                  <span><strong>Angel One Mobile App:</strong> Open the official Angel One mobile app on your smartphone to instantly view or exit open positions.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <AlertCircle size={14} className="text-warning-light shrink-0 mt-0.5" />
+                  <span><strong>Intraday Auto Square-Off:</strong> All orders use <code>INTRADAY</code> (MIS). Angel One RMS automatically squares off positions at 3:15 PM IST.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 size={14} className="text-profit-light shrink-0 mt-0.5" />
+                  <span><strong>Cloud VPS Recommendation:</strong> For 100% 24/7 uptime without power risk, host this bot headless on a cloud VPS (AWS, DigitalOcean, or Hetzner).</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* 60-Second Setup Guide */}
+          <div className="bg-gradient-to-r from-sky-500/10 via-surface-800 to-surface-800 border border-sky-500/30 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center gap-2 text-sky-400 font-bold text-base">
+              <Smartphone size={18} />
+              <span>How to Set Up Remote Telegram Control in 60 Seconds</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-surface-300">
+              <div className="bg-surface-900/80 p-4 rounded-xl border border-surface-700/60 space-y-1.5">
+                <span className="font-bold text-white block">Step 1: Create Your Bot</span>
+                <p>Open Telegram, search for <strong>@BotFather</strong>, and send <code>/newbot</code>. Choose a name and username to receive your <strong>Bot Token</strong>.</p>
+              </div>
+              <div className="bg-surface-900/80 p-4 rounded-xl border border-surface-700/60 space-y-1.5">
+                <span className="font-bold text-white block">Step 2: Get Your Chat ID</span>
+                <p>Search for <strong>@userinfobot</strong> on Telegram and tap Start. It will reply with your personal numeric <strong>Id</strong> (e.g. <code>987654321</code>).</p>
+              </div>
+              <div className="bg-surface-900/80 p-4 rounded-xl border border-surface-700/60 space-y-1.5">
+                <span className="font-bold text-white block">Step 3: Save in Settings & Start</span>
+                <p>Go to <strong>Settings &gt; Notifications</strong> in this app. Enter your Token &amp; Chat ID, click <strong>Save</strong>, open your bot chat and send <code>/status</code>!</p>
+              </div>
             </div>
           </div>
         </div>

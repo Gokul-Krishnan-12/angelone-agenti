@@ -445,6 +445,7 @@ const Settings: React.FC = () => {
                 <li>Search <strong>@BotFather</strong> on Telegram and send <code>/newbot</code> to get your <strong>Bot Token</strong>.</li>
                 <li>Search <strong>@userinfobot</strong> on Telegram to copy your personal <strong>Chat ID</strong>.</li>
                 <li>Open a chat with your newly created bot and click <strong>/start</strong> so it has permission to message you.</li>
+                <li><strong>2-Way Remote Control Active:</strong> You can send <code>/status</code>, <code>/positions</code>, <code>/start auto</code>, <code>/stop</code>, or <code>/squareoff</code> directly to your bot!</li>
               </ol>
             </div>
 
