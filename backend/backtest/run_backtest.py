@@ -47,8 +47,20 @@ NIFTY_50_SUBSET = [
 SHORT_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
 
-def screen_top_momentum_fno(period: str = "30d", top_n: int = 20) -> list[str]:
-    """Rank F&O stocks by realized intraday range, directional velocity, and net trend."""
+def screen_top_momentum_fno(
+    period: str = "30d",
+    top_n: int = 20,
+    min_price: float = 100.0,
+    max_price: float = 3000.0,
+    min_daily_volume: int = 500_000,
+) -> list[str]:
+    """Rank F&O stocks by realized intraday range, directional velocity, and net trend.
+
+    Applies Quality Universe Gate:
+    - Filters out penny stocks (price < min_price, e.g. < ₹100)
+    - Filters out ultra-high denomination stocks (price > max_price, e.g. > ₹3,000)
+    - Filters out illiquid stocks (daily volume < min_daily_volume, e.g. < 500k)
+    """
     import pandas as pd
     import yfinance as yf
 
@@ -56,7 +68,7 @@ def screen_top_momentum_fno(period: str = "30d", top_n: int = 20) -> list[str]:
 
     fno = get_fno_universe()
     print(
-        f"\n[Screener] Screening {len(fno)} F&O stocks for top {top_n} high-momentum leaders..."
+        f"\n[Screener] Screening {len(fno)} F&O stocks with Quality Filter (₹{min_price:,.0f}–₹{max_price:,.0f}, vol ≥ {min_daily_volume:,})..."
     )
     tickers = [f"{s}.NS" for s in fno]
 
@@ -80,10 +92,21 @@ def screen_top_momentum_fno(period: str = "30d", top_n: int = 20) -> list[str]:
                     "low": df["Low"][f"{s}.NS"],
                     "close": df["Close"][f"{s}.NS"],
                     "open": df["Open"][f"{s}.NS"],
+                    "volume": df["Volume"][f"{s}.NS"],
                 }
             ).dropna()
-            if len(sub) < 5:
+            if len(sub) < 10:
                 continue
+
+            mean_p = float(sub["close"].mean())
+            avg_vol = float(sub["volume"].mean())
+
+            # Quality Universe Gate
+            if mean_p < min_price or mean_p > max_price:
+                continue
+            if avg_vol < min_daily_volume:
+                continue
+
             range_pct = float(((sub["high"] - sub["low"]) / sub["close"] * 100).mean())
             body_pct = float(
                 (abs(sub["close"] - sub["open"]) / sub["open"] * 100).mean()
@@ -93,7 +116,19 @@ def screen_top_momentum_fno(period: str = "30d", top_n: int = 20) -> list[str]:
                 / sub["close"].iloc[0]
                 * 100
             )
-            score = (range_pct * 1.5) + (body_pct * 1.5) + (net_move * 0.5)
+
+            # Trend efficiency (net directional move vs total cumulative range)
+            tot_range = float((sub["high"] - sub["low"]).sum())
+            dir_efficiency = abs(sub["close"].iloc[-1] - sub["close"].iloc[0]) / (
+                tot_range + 1e-6
+            )
+
+            score = (
+                (range_pct * 1.5)
+                + (body_pct * 1.5)
+                + (net_move * 0.5)
+                + (dir_efficiency * 10.0)
+            )
             scores.append((s, score))
         except Exception:
             pass
@@ -103,7 +138,9 @@ def screen_top_momentum_fno(period: str = "30d", top_n: int = 20) -> list[str]:
 
     scores.sort(key=lambda x: x[1], reverse=True)
     top_symbols = [s for s, _ in scores[:top_n]]
-    print(f"[Screener] Top {top_n} F&O momentum symbols: {', '.join(top_symbols)}")
+    print(
+        f"[Screener] Top {top_n} Quality F&O momentum symbols: {', '.join(top_symbols)}"
+    )
     return top_symbols
 
 
@@ -185,6 +222,24 @@ def main():
         action="store_true",
         help="Disable the 50-EMA trend alignment quality filter",
     )
+    parser.add_argument(
+        "--min-price",
+        type=float,
+        default=100.0,
+        help="Quality filter: minimum nominal stock price (default: 100.0)",
+    )
+    parser.add_argument(
+        "--max-price",
+        type=float,
+        default=3000.0,
+        help="Quality filter: maximum nominal stock price (default: 3000.0)",
+    )
+    parser.add_argument(
+        "--min-vol",
+        type=int,
+        default=500_000,
+        help="Quality filter: minimum average daily volume (default: 500,000)",
+    )
 
     args = parser.parse_args()
 
@@ -192,7 +247,13 @@ def main():
     if args.symbols:
         symbols = args.symbols
     elif args.universe == "fno":
-        symbols = screen_top_momentum_fno(period=args.period, top_n=args.top_momentum)
+        symbols = screen_top_momentum_fno(
+            period=args.period,
+            top_n=args.top_momentum,
+            min_price=args.min_price,
+            max_price=args.max_price,
+            min_daily_volume=args.min_vol,
+        )
     elif args.universe == "nifty50":
         symbols = NIFTY_50_SUBSET[: args.top_momentum]
     else:

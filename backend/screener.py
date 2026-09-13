@@ -39,15 +39,19 @@ class DynamicScreener:
         return min(1.0, max(0.05, minutes_elapsed / 375.0))
 
     def generate_daily_watchlist(
-        self, universe: Optional[List[str]] = None, limit: int = 35
+        self,
+        universe: Optional[List[str]] = None,
+        limit: int = 35,
+        min_price: float = 50.0,
+        max_price: float = 4000.0,
     ) -> List[str]:
-        """
-        AI/Algorithmic screener that selects the top high-momentum F&O stocks to trade today.
+        """AI/Algorithmic screener that selects the top high-momentum F&O stocks to trade today.
 
         Ranks stocks using:
         1. Intraday Momentum & Directional Velocity (open-to-LTP, close-to-LTP, range expansion).
         2. Relative Volume (RVOL) vs cross-universe pace and time-of-day expected run-rate.
         3. High Institutional Participation (turnover in Crores and absorption near day extremes).
+        4. Quality Filter (excludes sub-₹50 penny stocks and ultra-high denomination stocks).
         """
         if universe is None:
             # Order F&O universe by high-liquidity NIFTY 50 first so fallback is high-quality
@@ -88,6 +92,10 @@ class DynamicScreener:
 
                 # Avoid unquoted, flat, or zero-volume stocks
                 if prev_close <= 0 or open_price <= 0 or ltp <= 0:
+                    continue
+
+                # Quality Universe Gate: avoid sub-₹50 penny stocks and ultra-high denomination stocks
+                if ltp < min_price or ltp > max_price:
                     continue
 
                 clean_symbol = (
