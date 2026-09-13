@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 
 from .fno_universe import get_fno_universe
 from .nifty_universe import NIFTY_50
@@ -12,11 +13,166 @@ from .smartapi_client import smart_api_client
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_BLACKLIST = {"SUZLON", "TIINDIA", "ICICIGI"}
+
+
+def calculate_kaufman_efficiency_ratio(
+    series: pd.Series | np.ndarray | list[float],
+    period: int = 20,
+) -> float:
+    """Calculate Kaufman Efficiency Ratio (KER / ER) over lookback period N.
+
+    Mathematical Definition:
+        Direction  = |Close_t - Close_{t-N}|
+        Volatility = Sum_{i=0}^{N-1} |Close_{t-i} - Close_{t-i-1}|
+        KER = Direction / Volatility (if Volatility > 0 else 0.0)
+
+    Parameters
+    ----------
+    series : Price series (typically daily close prices).
+    period : Lookback window N (default: 20).
+
+    Returns
+    -------
+    float : Efficiency ratio clamped in [0.0, 1.0].
+            1.0 = Pure straight-line trend.
+            <0.25 = Choppy, noisy, mean-reverting regime.
+    """
+    if series is None:
+        return 0.0
+
+    if not isinstance(series, pd.Series):
+        series = pd.Series(series)
+
+    clean = series.dropna()
+    if len(clean) < period + 1:
+        return 0.0
+
+    window = clean.iloc[-(period + 1) :]
+    direction = abs(float(window.iloc[-1]) - float(window.iloc[0]))
+    volatility = float(window.diff().abs().iloc[1:].sum())
+
+    if volatility <= 1e-12 or np.isnan(volatility) or np.isnan(direction):
+        return 0.0
+
+    ker = direction / volatility
+    return float(np.clip(ker, 0.0, 1.0))
+
+
+def evaluate_universe_candidate(
+    symbol: str,
+    daily_df: Optional[pd.DataFrame] = None,
+    ltp: Optional[float] = None,
+    rvol: Optional[float] = None,
+    current_time: Optional[datetime.time] = None,
+    min_price: float = 150.0,
+    min_turnover_cr: float = 40.0,
+    min_atr_pct: float = 1.5,
+    min_ker: float = 0.28,
+    min_rvol: float = 1.8,
+) -> tuple[bool, str, Dict[str, Any]]:
+    """Macro daily regime screening pipeline for universe candidates.
+
+    Quantitative Filter Gates:
+    1. Price Floor: LTP >= min_price (default: ₹150)
+    2. 20-Day Average Daily Turnover: >= min_turnover_cr (default: ₹40 Cr)
+    3. Daily ATR%: >= min_atr_pct (default: 1.5%)
+    4. Kaufman Efficiency Ratio (KER 20D): >= min_ker (default: 0.28)
+    5. Morning RVOL (at or after 09:45 IST): >= min_rvol (default: 1.8)
+
+    Returns
+    -------
+    tuple[bool, str, Dict[str, Any]] : (passed, reason, metrics_dict)
+    """
+    clean_sym = symbol.replace("NSE:", "").replace("-EQ", "").strip().upper()
+
+    if daily_df is not None and len(daily_df) >= 15:
+        closes = daily_df["close"]
+        highs = daily_df["high"]
+        lows = daily_df["low"]
+        volumes = daily_df["volume"]
+
+        calc_ltp = float(ltp if ltp is not None else closes.iloc[-1])
+        turnover_cr = float((closes.tail(20) * volumes.tail(20)).mean() / 10_000_000.0)
+
+        tr1 = highs - lows
+        tr2 = (highs - closes.shift(1)).abs()
+        tr3 = (lows - closes.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr14 = float(tr.rolling(window=14, min_periods=7).mean().iloc[-1])
+        atr_pct = float((atr14 / calc_ltp) * 100.0) if calc_ltp > 0 else 0.0
+
+        ker = calculate_kaufman_efficiency_ratio(closes, period=20)
+    else:
+        calc_ltp = float(ltp or 0.0)
+        turnover_cr = 50.0  # fallback when daily_df omitted
+        atr_pct = 2.0
+        ker = 0.50
+
+    metrics: Dict[str, Any] = {
+        "symbol": clean_sym,
+        "ltp": round(calc_ltp, 2),
+        "turnover_cr": round(turnover_cr, 2),
+        "atr_pct": round(atr_pct, 2),
+        "ker": round(ker, 3),
+        "rvol": round(rvol or 1.0, 2),
+    }
+
+    # 1. Price floor gate
+    if calc_ltp < min_price:
+        reason = f"LTP ₹{calc_ltp:.1f} < ₹{min_price:.0f} floor"
+        logger.debug("[%s] Dropped by Price Floor: %s", clean_sym, reason)
+        return False, reason, metrics
+
+    # 2. 20-Day Average Daily Turnover gate
+    if turnover_cr < min_turnover_cr:
+        reason = f"20D Avg Turnover ₹{turnover_cr:.1f}Cr < ₹{min_turnover_cr:.0f}Cr threshold"
+        logger.debug("[%s] Dropped by Turnover Filter: %s", clean_sym, reason)
+        return False, reason, metrics
+
+    # 3. Daily ATR% volatility expansion gate
+    if atr_pct < min_atr_pct:
+        reason = f"Daily ATR% {atr_pct:.2f}% < {min_atr_pct:.1f}% threshold (Insufficient Volatility)"
+        logger.debug("[%s] Dropped by ATR% Filter: %s", clean_sym, reason)
+        return False, reason, metrics
+
+    # 4. Kaufman Efficiency Ratio (Daily, N=20) trend regime gate
+    if ker < min_ker:
+        reason = f"KER {ker:.3f} < {min_ker:.2f} threshold (High Chop)"
+        logger.info(
+            "[%s] Dropped by KER Filter: ER=%.3f < %.2f threshold (High Chop)",
+            clean_sym,
+            ker,
+            min_ker,
+        )
+        return False, reason, metrics
+
+    # 5. Morning RVOL gate (active at or after 09:45 IST)
+    eval_time = current_time or datetime.datetime.now().time()
+    if rvol is not None and eval_time >= datetime.time(9, 45):
+        if rvol < min_rvol:
+            reason = f"Morning RVOL {rvol:.2f} < {min_rvol:.1f} threshold"
+            logger.debug("[%s] Dropped by Morning RVOL Filter: %s", clean_sym, reason)
+            return False, reason, metrics
+
+    logger.info(
+        "[%s] PASSED Universe Evaluation: LTP=₹%.1f, Turnover=₹%.1fCr, ATR%%=%.2f%%, KER=%.3f, RVOL=%.2f",
+        clean_sym,
+        calc_ltp,
+        turnover_cr,
+        atr_pct,
+        ker,
+        metrics["rvol"],
+    )
+    return True, "PASSED", metrics
+
 
 class DynamicScreener:
     def __init__(self):
         self.daily_watchlist: List[str] = []
         self.screener_stats: Dict[str, Dict[str, Any]] = {}
+        self.daily_metrics_cache: Dict[str, Dict[str, Any]] = {}
+        self._last_macro_eval_date: Optional[datetime.date] = None
 
     def get_stock_stats(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Retrieve latest calculated screener metrics for a symbol."""
@@ -38,20 +194,75 @@ class DynamicScreener:
 
         return min(1.0, max(0.05, minutes_elapsed / 375.0))
 
+    def precompute_macro_regimes(
+        self,
+        universe: Optional[List[str]] = None,
+        daily_data_map: Optional[Dict[str, pd.DataFrame]] = None,
+        min_price: float = 150.0,
+        min_turnover_cr: float = 40.0,
+        min_atr_pct: float = 1.5,
+        min_ker: float = 0.28,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Pre-market (before 09:15 IST) macro regime evaluation across candidate universe.
+
+        Filters out noisy, mean-reverting stocks using Daily Kaufman Efficiency Ratio (N=20)
+        and caches results for subsequent daytime screening runs.
+        """
+        if universe is None:
+            fno = get_fno_universe()
+            universe = [s for s in NIFTY_50 if s in fno] + [
+                s for s in fno if s not in NIFTY_50
+            ]
+
+        today = datetime.date.today()
+        passed_cache: Dict[str, Dict[str, Any]] = {}
+
+        for sym in universe:
+            clean_sym = sym.replace("NSE:", "").replace("-EQ", "").strip().upper()
+            if clean_sym in DEFAULT_BLACKLIST:
+                continue
+
+            daily_df = daily_data_map.get(clean_sym) if daily_data_map else None
+
+            passed, _reason, metrics = evaluate_universe_candidate(
+                symbol=clean_sym,
+                daily_df=daily_df,
+                min_price=min_price,
+                min_turnover_cr=min_turnover_cr,
+                min_atr_pct=min_atr_pct,
+                min_ker=min_ker,
+            )
+
+            if passed:
+                passed_cache[clean_sym] = metrics
+
+        self.daily_metrics_cache = passed_cache
+        self._last_macro_eval_date = today
+        logger.info(
+            "Precomputed Macro Regimes: %d/%d candidates passed KER >= %.2f and liquidity gates.",
+            len(passed_cache),
+            len(universe),
+            min_ker,
+        )
+        return passed_cache
+
     def generate_daily_watchlist(
         self,
         universe: Optional[List[str]] = None,
         limit: int = 35,
         min_price: float = 50.0,
-        max_price: float = 4000.0,
+        max_price: float = 100_000.0,
+        daily_data_map: Optional[Dict[str, pd.DataFrame]] = None,
+        min_ker: float = 0.28,
     ) -> List[str]:
         """AI/Algorithmic screener that selects the top high-momentum F&O stocks to trade today.
 
         Ranks stocks using:
-        1. Intraday Momentum & Directional Velocity (open-to-LTP, close-to-LTP, range expansion).
-        2. Relative Volume (RVOL) vs cross-universe pace and time-of-day expected run-rate.
-        3. High Institutional Participation (turnover in Crores and absorption near day extremes).
-        4. Quality Filter (excludes sub-₹50 penny stocks and ultra-high denomination stocks).
+        1. Macro Regime Gate: Kaufman Efficiency Ratio (KER >= 0.28 on Daily bars).
+        2. Intraday Momentum & Directional Velocity (open-to-LTP, close-to-LTP, range expansion).
+        3. Relative Volume (RVOL) vs cross-universe pace and time-of-day expected run-rate.
+        4. High Institutional Participation (turnover in Crores and absorption near day extremes).
+        5. Quality Filter (excludes penny stocks and blacklisted structural traps).
         """
         if universe is None:
             # Order F&O universe by high-liquidity NIFTY 50 first so fallback is high-quality
@@ -94,13 +305,15 @@ class DynamicScreener:
                 if prev_close <= 0 or open_price <= 0 or ltp <= 0:
                     continue
 
-                # Quality Universe Gate: avoid sub-₹50 penny stocks and ultra-high denomination stocks
-                if ltp < min_price or ltp > max_price:
-                    continue
-
                 clean_symbol = (
                     symbol.replace("NSE:", "").replace("-EQ", "").strip().upper()
                 )
+                if clean_symbol in DEFAULT_BLACKLIST:
+                    continue
+
+                if ltp < min_price or ltp > max_price:
+                    continue
+
                 turnover = ltp * volume
 
                 parsed_candidates.append(
@@ -145,7 +358,39 @@ class DynamicScreener:
                 turnover = c["turnover"]
                 symbol = c["symbol"]
 
-                # ── 1. Momentum & Directional Velocity ───────────────────────
+                # ── 1. Relative Volume (RVOL) ────────────────────────────────
+                rvol_universe = volume / median_vol
+                expected_tod_vol = max(25_000.0, 1_000_000.0 * day_fraction)
+                rvol_tod = volume / expected_tod_vol
+                rvol = float(np.clip(0.6 * rvol_universe + 0.4 * rvol_tod, 0.2, 5.0))
+
+                # ── 2. Kaufman Efficiency Ratio Macro Check (if daily data available)
+                daily_df = daily_data_map.get(symbol) if daily_data_map else None
+                ker_val = 0.50
+                if daily_df is not None:
+                    ker_val = calculate_kaufman_efficiency_ratio(
+                        daily_df["close"], period=20
+                    )
+                    if ker_val < min_ker:
+                        logger.info(
+                            "[%s] Dropped by KER Filter: ER=%.3f < %.2f threshold (High Chop)",
+                            symbol,
+                            ker_val,
+                            min_ker,
+                        )
+                        continue
+                elif symbol in self.daily_metrics_cache:
+                    ker_val = self.daily_metrics_cache[symbol].get("ker", 0.50)
+                    if ker_val < min_ker:
+                        logger.info(
+                            "[%s] Dropped by KER Filter: ER=%.3f < %.2f threshold (High Chop)",
+                            symbol,
+                            ker_val,
+                            min_ker,
+                        )
+                        continue
+
+                # ── 3. Momentum & Directional Velocity ───────────────────────
                 change_pct = abs(ltp - prev_close) / prev_close * 100.0
                 open_to_ltp_pct = abs(ltp - open_price) / open_price * 100.0
                 gap_pct = abs(open_price - prev_close) / prev_close * 100.0
@@ -156,48 +401,37 @@ class DynamicScreener:
                     (change_pct * 1.5) + (open_to_ltp_pct * 2.0) + (gap_pct * 0.6)
                 )
 
-                # ── 2. Relative Volume (RVOL) ────────────────────────────────
-                # Volume relative to universe median at current time
-                rvol_universe = volume / median_vol
-
-                # Volume relative to time-of-day expected baseline (1M daily shares baseline)
-                expected_tod_vol = max(25_000.0, 1_000_000.0 * day_fraction)
-                rvol_tod = volume / expected_tod_vol
-
-                # Combined RVOL metric clamped between 0.2 and 5.0
-                rvol = float(np.clip(0.6 * rvol_universe + 0.4 * rvol_tod, 0.2, 5.0))
-
                 # RVOL multiplier: boosts momentum if active volume, dampens if low liquidity
                 rvol_multiplier = 0.5 + (0.5 * min(3.0, rvol))
 
-                # ── 3. High Institutional Participation ──────────────────────
-                # Turnover in Crores (1 Cr = 10^7 INR)
+                # ── 4. High Institutional Participation ──────────────────────
                 turnover_cr = turnover / 10_000_000.0
                 turnover_score = min(4.0, turnover_cr / 20.0) + min(
                     2.0, (turnover / median_turnover) * 0.5
                 )
 
-                # Institutional Absorption: is price pinned near day high or low?
                 if day_range > 0:
                     pos_in_range = (ltp - low_price) / day_range
                     absorption = abs(pos_in_range - 0.5) * 2.0
                 else:
                     absorption = 0.0
 
-                # Range expansion score (institutional range driver)
                 expansion_score = min(4.0, range_pct * 1.2)
-
                 inst_participation = (
                     (turnover_score * 1.2) + (absorption * 2.0) + expansion_score
                 )
 
-                # ── 4. Composite In-Play Score ────────────────────────────────
-                composite_score = (raw_momentum * rvol_multiplier) + inst_participation
+                # ── 5. Composite In-Play Score (Weighted with KER) ────────────
+                ker_boost = 0.8 + (0.4 * ker_val)  # Higher KER smoothly enhances score
+                composite_score = (
+                    (raw_momentum * rvol_multiplier) + inst_participation
+                ) * ker_boost
 
                 stock_entry = {
                     "symbol": symbol,
                     "score": round(composite_score, 2),
                     "rvol": round(rvol, 2),
+                    "ker": round(ker_val, 3),
                     "volume": volume,
                     "turnover_cr": round(turnover_cr, 2),
                     "change_pct": round(change_pct, 2),
@@ -214,7 +448,7 @@ class DynamicScreener:
             self.screener_stats = stats_map
 
             top_summary = ", ".join(
-                f"{s['symbol']}(score={s['score']}, rvol={s['rvol']}x, to={s['turnover_cr']}Cr)"
+                f"{s['symbol']}(score={s['score']}, KER={s['ker']}, rvol={s['rvol']}x, to={s['turnover_cr']}Cr)"
                 for s in scored_stocks[: min(5, len(scored_stocks))]
             )
             logger.info(

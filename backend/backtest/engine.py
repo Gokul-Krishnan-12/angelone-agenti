@@ -233,6 +233,9 @@ class BacktestEngine:
                 "adx_momentum",
                 "rsi_reversal",
                 "vwap_bounce",
+                "mfi_exhaustion",
+                "stochastic_reversal",
+                "supertrend",
             }
         )
 

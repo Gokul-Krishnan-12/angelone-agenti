@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from typing import List, Optional
 
 # ── Default symbol list (Nifty 50 liquid names) ──────────────────────────────
 
@@ -47,28 +48,31 @@ NIFTY_50_SUBSET = [
 SHORT_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
 
+DEFAULT_BLACKLIST = ["SUZLON", "TIINDIA", "ICICIGI"]
+
+
 def screen_top_momentum_fno(
     period: str = "30d",
     top_n: int = 20,
-    min_price: float = 100.0,
-    max_price: float = 3000.0,
-    min_daily_volume: int = 500_000,
+    min_price: float = 0.0,
+    max_price: float = 100_000.0,
+    min_daily_volume: int = 0,
+    blacklist: Optional[List[str]] = None,
 ) -> list[str]:
     """Rank F&O stocks by realized intraday range, directional velocity, and net trend.
 
-    Applies Quality Universe Gate:
-    - Filters out penny stocks (price < min_price, e.g. < ₹100)
-    - Filters out ultra-high denomination stocks (price > max_price, e.g. > ₹3,000)
-    - Filters out illiquid stocks (daily volume < min_daily_volume, e.g. < 500k)
+    Excludes toxic drag stocks (blacklist) and low-liquidity symbols.
     """
     import pandas as pd
     import yfinance as yf
 
     from ..fno_universe import get_fno_universe
 
-    fno = get_fno_universe()
+    active_blacklist = set(blacklist if blacklist is not None else DEFAULT_BLACKLIST)
+
+    fno = [s for s in get_fno_universe() if s not in active_blacklist]
     print(
-        f"\n[Screener] Screening {len(fno)} F&O stocks with Quality Filter (₹{min_price:,.0f}–₹{max_price:,.0f}, vol ≥ {min_daily_volume:,})..."
+        f"\n[Screener] Screening {len(fno)} F&O stocks (blacklisted: {', '.join(active_blacklist)})..."
     )
     tickers = [f"{s}.NS" for s in fno]
 
@@ -85,6 +89,8 @@ def screen_top_momentum_fno(
 
     scores = []
     for s in fno:
+        if s in active_blacklist:
+            continue
         try:
             sub = pd.DataFrame(
                 {
@@ -101,10 +107,11 @@ def screen_top_momentum_fno(
             mean_p = float(sub["close"].mean())
             avg_vol = float(sub["volume"].mean())
 
-            # Quality Universe Gate
-            if mean_p < min_price or mean_p > max_price:
+            if min_price > 0 and mean_p < min_price:
                 continue
-            if avg_vol < min_daily_volume:
+            if max_price < 100_000.0 and mean_p > max_price:
+                continue
+            if min_daily_volume > 0 and avg_vol < min_daily_volume:
                 continue
 
             range_pct = float(((sub["high"] - sub["low"]) / sub["close"] * 100).mean())
@@ -237,15 +244,21 @@ def main():
     parser.add_argument(
         "--min-vol",
         type=int,
-        default=500_000,
-        help="Quality filter: minimum average daily volume (default: 500,000)",
+        default=0,
+        help="Quality filter: minimum average daily volume (default: 0)",
+    )
+    parser.add_argument(
+        "--blacklist",
+        nargs="+",
+        default=DEFAULT_BLACKLIST,
+        help="Symbols to exclude from trading (default: SUZLON TIINDIA ICICIGI)",
     )
 
     args = parser.parse_args()
 
     # Symbol selection
     if args.symbols:
-        symbols = args.symbols
+        symbols = [s for s in args.symbols if s not in args.blacklist]
     elif args.universe == "fno":
         symbols = screen_top_momentum_fno(
             period=args.period,
@@ -253,6 +266,7 @@ def main():
             min_price=args.min_price,
             max_price=args.max_price,
             min_daily_volume=args.min_vol,
+            blacklist=args.blacklist,
         )
     elif args.universe == "nifty50":
         symbols = NIFTY_50_SUBSET[: args.top_momentum]
