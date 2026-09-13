@@ -1,0 +1,12 @@
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+loguru>=0.7.0
+numpy>=1.26.0
+pandas>=2.1.0
+pyotp>=2.9.0
+requests>=2.31.0
+smartapi-python>=1.5.5
+websocket-client>=1.8.0
+ta>=0.11.0
+pytest>=8.0.0
