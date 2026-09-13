@@ -5,6 +5,9 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+.cache/
+.pytest_cache/
+.ruff_cache/
 
 # Build output
 dist/
@@ -42,3 +45,7 @@ logs/
 build/
 backend_dist/
 *.spec
+
+# Reports & Backtest Outputs
+backtest*.md
+

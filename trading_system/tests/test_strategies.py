@@ -50,6 +50,50 @@ def test_fvg_engine_initialization():
     assert isinstance(signals, list)
 
 
+def test_bollinger_expansion_strategy():
+    from trading_system.strategies.bollinger_expansion import BollingerExpansionStrategy
+
+    strat = BollingerExpansionStrategy(period=20)
+    df = create_synthetic_candle_df(length=40, base_price=1000.0)
+
+    # Trigger bullish expansion: massive spike outside upper band with high volume
+    df.loc[df.index[-1], "close"] = 1100.0
+    df.loc[df.index[-1], "high"] = 1105.0
+    df.loc[df.index[-1], "volume"] = 200000.0
+
+    signals = strat.evaluate(df, "PAYTM")
+    assert isinstance(signals, list)
+    if signals:
+        assert signals[0].direction == "BUY"
+        assert signals[0].family == "volatility"
+
+
+def test_institutional_absorption_strategy():
+    from trading_system.strategies.institutional_absorption import (
+        InstitutionalAbsorptionStrategy,
+    )
+
+    strat = InstitutionalAbsorptionStrategy(vol_multiplier=1.8, min_wick_ratio=0.50)
+    df = create_synthetic_candle_df(length=35, base_price=1000.0)
+
+    # Trigger bullish absorption: long lower wick, close in upper half, huge volume
+    curr_low = 970.0
+    curr_open = 995.0
+    curr_close = 1000.0
+    curr_high = 1002.0
+    df.loc[df.index[-1], "open"] = curr_open
+    df.loc[df.index[-1], "close"] = curr_close
+    df.loc[df.index[-1], "low"] = curr_low
+    df.loc[df.index[-1], "high"] = curr_high
+    df.loc[df.index[-1], "volume"] = 150000.0  # Huge volume
+
+    signals = strat.evaluate(df, "MCX")
+    assert isinstance(signals, list)
+    if signals:
+        assert signals[0].direction == "BUY"
+        assert signals[0].family == "reversal"
+
+
 def test_breakout_engine_detection():
     df = create_synthetic_candle_df(length=30, base_price=1000.0)
     engine = BreakoutEngine()

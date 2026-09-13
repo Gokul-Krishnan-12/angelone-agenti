@@ -169,6 +169,16 @@ class ConfluenceGate:
                 logger.debug("ConfluenceGate: Rejected counter-trend SELL above 50 EMA")
                 return None
 
+        # 2. ADX Volatility / Trend Strength Regime Gate
+        if len(df) >= 28:
+            adx = BaseStrategy.compute_adx(df, period=14)
+            if adx < 18.0:
+                logger.debug(
+                    "ConfluenceGate: Rejected signal in low-trend regime (ADX %.1f < 18.0)",
+                    adx,
+                )
+                return None
+
         # 2. Independent Family Confluence Gate
         families_voting = {s.family for s in selected_group}
         if len(families_voting) < self.settings.min_confluence:

@@ -161,6 +161,36 @@ class CircuitBreaker:
 
         return False, "Holding"
 
+    def execute_emergency_kill_switch(self, order_router: Any) -> int:
+        """
+        Execute emergency kill switch protocol:
+        1. Trip circuit breaker lock switch.
+        2. Cancel all pending exchange-side STOPLOSS_LIMIT / trigger orders.
+        3. Liquidate any open positions immediately via market/aggressive limit.
+        4. Lock engine until the next trading session.
+
+        Returns
+        -------
+        int
+            Number of positions liquidated.
+        """
+        self.trip_circuit(
+            "Emergency Kill Switch Triggered (Daily Drawdown / Capital Guard)"
+        )
+
+        if not hasattr(order_router, "emergency_square_off_all"):
+            logger.error(
+                "CircuitBreaker: OrderRouter missing emergency_square_off_all method"
+            )
+            return 0
+
+        liquidated_count = order_router.emergency_square_off_all()
+        logger.critical(
+            "🛑 KILL SWITCH EXECUTED: Cancelled all open triggers, liquidated %d positions. Engine locked.",
+            liquidated_count,
+        )
+        return liquidated_count
+
     def get_status(self) -> Dict[str, Any]:
         """Return snapshot of current circuit breaker state."""
         return {
@@ -172,4 +202,5 @@ class CircuitBreaker:
             "completed_trades": self.completed_trades_count,
             "max_trades_allowed": self.settings.max_daily_trades,
             "max_daily_loss": self.settings.max_daily_loss,
+            "single_position_lock": self.settings.max_open_positions == 1,
         }

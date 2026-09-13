@@ -307,3 +307,46 @@ class OrderRouter:
             )
         except Exception as e:
             logger.critical("Failed emergency liquidation for %s: %s", tradingsymbol, e)
+
+    def cancel_all_open_triggers(self) -> int:
+        """Cancel all pending exchange-side STOPLOSS_LIMIT orders across all active trades."""
+        cancelled = 0
+        for symbol, trade in list(self.active_trades.items()):
+            if trade.sl_order_id:
+                if self.cancel_order(trade.sl_order_id, variety="STOPLOSS"):
+                    cancelled += 1
+                    logger.info(
+                        "Cancelled broker SL trigger order %s for %s",
+                        trade.sl_order_id,
+                        symbol,
+                    )
+                    trade.sl_order_id = ""
+        return cancelled
+
+    def emergency_square_off_all(self) -> int:
+        """
+        Cancel all open trigger orders and aggressively liquidate all open positions.
+        Used by daily kill-switch daemon and 15:15 IST EOD square-off.
+        """
+        self.cancel_all_open_triggers()
+        liquidated = 0
+
+        for symbol, trade in list(self.active_trades.items()):
+            if trade.status == "OPEN":
+                exit_tx = "SELL" if trade.direction == "BUY" else "BUY"
+                self.emergency_exit_position(
+                    tradingsymbol=trade.tradingsymbol,
+                    token=trade.token,
+                    quantity=trade.quantity,
+                    transaction_type=exit_tx,
+                    current_ltp=trade.current_sl,
+                )
+                trade.status = "CLOSED"
+                self.active_trades.pop(symbol, None)
+                liquidated += 1
+
+        logger.warning(
+            "Emergency square-off completed. Liquidated %d active position(s).",
+            liquidated,
+        )
+        return liquidated

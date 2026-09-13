@@ -24,8 +24,9 @@ from .risk.circuit_breaker import CircuitBreaker
 from .risk.friction_guard import FrictionGuard
 from .risk.position_sizer import PositionSizer
 from .strategies.base import ConfluenceGate
+from .strategies.bollinger_expansion import BollingerExpansionStrategy
 from .strategies.breakout_engine import BreakoutEngine
-from .strategies.cpr_engine import CPREngine
+from .strategies.institutional_absorption import InstitutionalAbsorptionStrategy
 from .strategies.institutional_fvg import InstitutionalFVGStrategy
 
 # Configure loguru format
@@ -84,11 +85,12 @@ class TradingSystemEngine:
         self.position_sizer = PositionSizer(self.settings)
         self.friction_guard = FrictionGuard(self.settings)
 
-        # 3. Strategy Suite & Confluence
+        # 3. Strategy Suite & Confluence (Top 4 Proven Alpha Engines)
         self.strategies = [
             BreakoutEngine(),
+            BollingerExpansionStrategy(),
+            InstitutionalAbsorptionStrategy(),
             InstitutionalFVGStrategy(),
-            CPREngine(),
         ]
         self.confluence_gate = ConfluenceGate(self.settings)
 
@@ -177,10 +179,11 @@ class TradingSystemEngine:
         if not approved_signal:
             return
 
-        # 4. Quantitative 1R Volatility Parity Position Sizing
+        # 4. Quantitative 1R Volatility Parity Position Sizing & Friction Guard
         quantity, size_result = self.position_sizer.calculate_size(
             entry_price=approved_signal.entry_price,
             stop_loss=approved_signal.stop_loss,
+            target_price=approved_signal.target_price,
             portfolio_equity=self.settings.portfolio_equity,
         )
         if not size_result.is_valid or quantity <= 0:

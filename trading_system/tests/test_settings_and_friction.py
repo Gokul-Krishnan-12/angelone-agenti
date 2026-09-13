@@ -17,7 +17,7 @@ def test_settings_initialization():
     assert settings.portfolio_equity == 150_000.0
     assert settings.risk_percent == 1.0
     assert settings.max_daily_loss == 2_000.0
-    assert "RELIANCE" in settings.watchlist
+    assert "PAYTM" in settings.watchlist
 
 
 def test_statutory_friction_breakdown():

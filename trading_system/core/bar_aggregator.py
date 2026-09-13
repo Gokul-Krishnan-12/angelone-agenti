@@ -9,7 +9,7 @@ import asyncio
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable, Coroutine, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 import pandas as pd
 from loguru import logger
@@ -45,32 +45,84 @@ class Candle:
 
 class BarAggregator:
     """
-    Ingests live tick streams, builds rolling 1m and 5m OHLCV bars in-memory,
-    and fires asynchronous `on_candle_close` events precisely at bucket boundaries.
+    High-Performance In-Memory WebSocket Bar Aggregator.
+    Synthesizes live 1-minute and 5-minute OHLCV candles from tick feeds without REST polling.
+    Fires asynchronous `on_candle_close` events precisely at 5-minute boundaries (t % 300 == 0).
     """
 
     def __init__(
         self,
-        bar_interval_seconds: int = 300,  # 5-minute bars default
+        bar_interval_seconds: int = 300,  # 5-minute bars default for decision engine
         max_history: int = 300,
         on_candle_close: Optional[
+            Callable[[str, str, Candle, pd.DataFrame], Coroutine]
+        ] = None,
+        on_1m_candle_close: Optional[
             Callable[[str, str, Candle, pd.DataFrame], Coroutine]
         ] = None,
     ):
         self.bar_interval = bar_interval_seconds
         self.max_history = max_history
         self.on_candle_close = on_candle_close
+        self.on_1m_candle_close = on_1m_candle_close
 
-        # Current incomplete building bars: token -> Candle
-        self._current_bar: Dict[str, Candle] = {}
+        # Current incomplete building bars
+        self._current_bar_5m: Dict[str, Candle] = {}
+        self._current_bar_1m: Dict[str, Candle] = {}
 
         # Historical completed bars: token -> deque of Candle
-        self._history: Dict[str, deque[Candle]] = defaultdict(
+        self._history_5m: Dict[str, deque[Candle]] = defaultdict(
             lambda: deque(maxlen=self.max_history)
+        )
+        self._history_1m: Dict[str, deque[Candle]] = defaultdict(
+            lambda: deque(maxlen=self.max_history * 5)
         )
 
         # Volume state tracking (cumulative day volume delta calculation)
         self._last_day_volume: Dict[str, float] = defaultdict(float)
+
+    @property
+    def _current_bar(self) -> Dict[str, Candle]:
+        """Backward-compatible accessor for current active 5m building candle."""
+        return self._current_bar_5m
+
+    @property
+    def _history(self) -> Dict[str, deque[Candle]]:
+        """Backward-compatible accessor for historical 5m completed bars."""
+        return self._history_5m
+
+    def process_raw_quote(
+        self,
+        token: str,
+        tradingsymbol: str,
+        quote_data: Dict[str, Any],
+    ):
+        """
+        Convenience ingestion method for raw Mode 2 QUOTE packets from SmartWebSocketV2.
+        Normalizes Paise to INR (divides by 100.0).
+        """
+        raw_price = quote_data.get("last_traded_price")
+        if raw_price is not None:
+            ltp = float(raw_price) / 100.0
+        else:
+            raw_alt = quote_data.get("ltp") or quote_data.get("last_price") or 0.0
+            ltp = float(raw_alt)
+
+        if ltp <= 0:
+            return
+
+        day_vol = float(
+            quote_data.get("volume_trade_for_the_day")
+            or quote_data.get("volume")
+            or 0.0
+        )
+        ts = time.time()
+        ex_ts = quote_data.get("exchange_timestamp")
+        if ex_ts and str(ex_ts).isdigit():
+            num_ts = float(ex_ts)
+            ts = num_ts / 1000.0 if num_ts > 1e11 else num_ts
+
+        self.process_tick(token, tradingsymbol, ltp, day_vol, ts)
 
     def process_tick(
         self,
@@ -81,26 +133,12 @@ class BarAggregator:
         tick_time: Optional[float] = None,
     ):
         """
-        Ingest normalized tick and update live candlestick synthesis.
-
-        Parameters
-        ----------
-        token : str
-            Instrument scrip token.
-        tradingsymbol : str
-            Trading symbol name (e.g. 'RELIANCE').
-        ltp : float
-            Normalized Last Traded Price in INR.
-        day_volume : float, default=0.0
-            Exchange cumulative traded volume for the day.
-        tick_time : float, optional
-            Timestamp in epoch seconds (defaults to time.time()).
+        Ingest normalized tick and synthesize dual 1-minute and 5-minute candles.
         """
         if ltp <= 0:
             return
 
         now_ts = tick_time if tick_time is not None else time.time()
-        bucket_ts = (int(now_ts) // self.bar_interval) * self.bar_interval
 
         # Calculate incremental volume delta since last tick
         prev_day_vol = self._last_day_volume[token]
@@ -111,15 +149,15 @@ class BarAggregator:
         )
         self._last_day_volume[token] = day_volume
 
-        curr = self._current_bar.get(token)
+        # ── 1. Update 1-Minute Bar ───────────────────────────────────
+        bucket_1m = (int(now_ts) // 60) * 60
+        curr_1m = self._current_bar_1m.get(token)
 
-        # Check if tick belongs to a new time bucket
-        if curr is None:
-            # First tick for this token
-            self._current_bar[token] = Candle(
+        if curr_1m is None:
+            self._current_bar_1m[token] = Candle(
                 token=token,
                 tradingsymbol=tradingsymbol,
-                timestamp=bucket_ts,
+                timestamp=bucket_1m,
                 open=ltp,
                 high=ltp,
                 low=ltp,
@@ -127,21 +165,14 @@ class BarAggregator:
                 volume=vol_delta,
                 is_closed=False,
             )
-            return
-
-        if bucket_ts > curr.timestamp:
-            # Current bar has officially closed!
-            curr.is_closed = True
-            closed_bar = curr
-
-            # Append to rolling ring buffer
-            self._history[token].append(closed_bar)
-
-            # Start fresh building bar for the new bucket
-            self._current_bar[token] = Candle(
+        elif bucket_1m > curr_1m.timestamp:
+            curr_1m.is_closed = True
+            closed_1m = curr_1m
+            self._history_1m[token].append(closed_1m)
+            self._current_bar_1m[token] = Candle(
                 token=token,
                 tradingsymbol=tradingsymbol,
-                timestamp=bucket_ts,
+                timestamp=bucket_1m,
                 open=ltp,
                 high=ltp,
                 low=ltp,
@@ -149,42 +180,93 @@ class BarAggregator:
                 volume=vol_delta,
                 is_closed=False,
             )
-
-            # Dispatch asynchronous candle closure event to alpha engine
-            if self.on_candle_close:
-                history_df = self.get_history_df(token)
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(
-                        self.on_candle_close(
-                            token, tradingsymbol, closed_bar, history_df
-                        )
-                    )
-                except RuntimeError:
-                    # If running outside an active event loop (e.g. unit tests)
-                    asyncio.run(
-                        self.on_candle_close(
-                            token, tradingsymbol, closed_bar, history_df
-                        )
-                    )
-
+            if self.on_1m_candle_close:
+                self._dispatch_callback(
+                    self.on_1m_candle_close,
+                    token,
+                    tradingsymbol,
+                    closed_1m,
+                    self.get_history_df(token, interval=1),
+                )
         else:
-            # Update current active candle in-place
-            curr.high = max(curr.high, ltp)
-            curr.low = min(curr.low, ltp)
-            curr.close = ltp
-            curr.volume += vol_delta
+            curr_1m.high = max(curr_1m.high, ltp)
+            curr_1m.low = min(curr_1m.low, ltp)
+            curr_1m.close = ltp
+            curr_1m.volume += vol_delta
+
+        # ── 2. Update 5-Minute Bar (Primary Strategy Evaluation Timeframe) ─
+        bucket_5m = (int(now_ts) // self.bar_interval) * self.bar_interval
+        curr_5m = self._current_bar_5m.get(token)
+
+        if curr_5m is None:
+            self._current_bar_5m[token] = Candle(
+                token=token,
+                tradingsymbol=tradingsymbol,
+                timestamp=bucket_5m,
+                open=ltp,
+                high=ltp,
+                low=ltp,
+                close=ltp,
+                volume=vol_delta,
+                is_closed=False,
+            )
+        elif bucket_5m > curr_5m.timestamp:
+            curr_5m.is_closed = True
+            closed_5m = curr_5m
+            self._history_5m[token].append(closed_5m)
+            self._current_bar_5m[token] = Candle(
+                token=token,
+                tradingsymbol=tradingsymbol,
+                timestamp=bucket_5m,
+                open=ltp,
+                high=ltp,
+                low=ltp,
+                close=ltp,
+                volume=vol_delta,
+                is_closed=False,
+            )
+
+            # Fire sub-20ms asynchronous candle close callback
+            if self.on_candle_close:
+                history_df = self.get_history_df(token, interval=5)
+                self._dispatch_callback(
+                    self.on_candle_close, token, tradingsymbol, closed_5m, history_df
+                )
+        else:
+            curr_5m.high = max(curr_5m.high, ltp)
+            curr_5m.low = min(curr_5m.low, ltp)
+            curr_5m.close = ltp
+            curr_5m.volume += vol_delta
+
+    def _dispatch_callback(
+        self,
+        callback: Callable[[str, str, Candle, pd.DataFrame], Coroutine],
+        token: str,
+        tradingsymbol: str,
+        closed_bar: Candle,
+        history_df: pd.DataFrame,
+    ):
+        """Execute async callback cleanly inside current event loop or sync runner."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(callback(token, tradingsymbol, closed_bar, history_df))
+        except RuntimeError:
+            asyncio.run(callback(token, tradingsymbol, closed_bar, history_df))
 
     def seed_history(
-        self, token: str, tradingsymbol: str, candles: List[Dict[str, float]]
+        self,
+        token: str,
+        tradingsymbol: str,
+        candles: List[Dict[str, float]],
+        interval: int = 5,
     ):
-        """
-        Pre-seed the ring buffer with initial historical candles (e.g. at startup).
-        """
-        buf = self._history[token]
-        buf.clear()
+        """Pre-seed the ring buffer with initial historical candles at system startup."""
+        target_buf = (
+            self._history_5m[token] if interval == 5 else self._history_1m[token]
+        )
+        target_buf.clear()
         for c in candles:
-            buf.append(
+            target_buf.append(
                 Candle(
                     token=token,
                     tradingsymbol=tradingsymbol,
@@ -198,12 +280,17 @@ class BarAggregator:
                 )
             )
         logger.info(
-            "Pre-seeded %d historical bars for %s (%s)", len(buf), tradingsymbol, token
+            "Pre-seeded %d historical %dm bars for %s (%s)",
+            len(target_buf),
+            interval,
+            tradingsymbol,
+            token,
         )
 
-    def get_history_df(self, token: str) -> pd.DataFrame:
+    def get_history_df(self, token: str, interval: int = 5) -> pd.DataFrame:
         """Return historical completed bars as a pandas DataFrame."""
-        records = [c.to_dict() for c in self._history[token]]
+        source = self._history_5m[token] if interval == 5 else self._history_1m[token]
+        records = [c.to_dict() for c in source]
         if not records:
             return pd.DataFrame(
                 columns=["open", "high", "low", "close", "volume", "timestamp"]
@@ -217,6 +304,8 @@ class BarAggregator:
         df["volume"] = df["volume"].astype(float)
         return df
 
-    def get_bars_count(self, token: str) -> int:
+    def get_bars_count(self, token: str, interval: int = 5) -> int:
         """Return count of closed bars in memory for token."""
-        return len(self._history[token])
+        return len(
+            self._history_5m[token] if interval == 5 else self._history_1m[token]
+        )

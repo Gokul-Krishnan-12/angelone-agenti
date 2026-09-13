@@ -60,7 +60,7 @@ def screen_top_momentum_fno(period: str = "30d", top_n: int = 20) -> list[str]:
     )
     tickers = [f"{s}.NS" for s in fno]
 
-    daily_period = "30d" if period in ("30d", "60d") else period
+    daily_period = period if period in ("30d", "60d", "90d") else "60d"
     try:
         df = yf.download(
             tickers=tickers, period=daily_period, interval="1d", progress=False
@@ -144,6 +144,13 @@ def main():
         help="Output markdown report path (default: backtest_report.md)",
     )
     parser.add_argument(
+        "--capital",
+        type=float,
+        default=20000.0,
+        help="Capital allocated per trade in INR (default: 20000.0)",
+    )
+
+    parser.add_argument(
         "--confluence",
         type=int,
         default=2,
@@ -196,6 +203,7 @@ def main():
     print("=" * 70)
     print(f"  Interval     : {args.interval}")
     print(f"  Period       : {args.period}")
+    print(f"  Capital/Trade: ₹{args.capital:,.0f}")
     print(f"  Universe     : {args.universe} (top {len(symbols)} symbols)")
     print(
         f"  Symbols      : {', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}"
@@ -240,7 +248,7 @@ def main():
     engine = BacktestEngine(
         min_confluence=args.confluence,
         min_rr=args.min_rr,
-        capital_per_trade=10_000.0,
+        capital_per_trade=args.capital,
         trailing_sl_multiplier=args.trailing_atr,
         min_bars=60,
         trail_after_r=args.trail_after_r,
@@ -267,6 +275,7 @@ def main():
         interval=args.interval,
         period=args.period,
         output_path=args.output,
+        capital=args.capital,
     )
 
 

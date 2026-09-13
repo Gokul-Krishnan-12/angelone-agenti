@@ -21,6 +21,7 @@ def generate_report(
     interval: str,
     period: str,
     output_path: str | None = None,
+    capital: float = 20_000.0,
 ) -> dict:
     """
     Compute backtest statistics and produce a markdown report.
@@ -39,26 +40,35 @@ def generate_report(
     avg_win_pct = statistics.mean(t.pnl_pct for t in wins) if wins else 0
     avg_loss_pct = statistics.mean(t.pnl_pct for t in losses) if losses else 0
 
-    # ── P&L ─────────────────────────────────────────────────────────
-    total_pnl_rs = sum(t.pnl_rs for t in trades)
-    gross_profit = sum(t.pnl_rs for t in wins)
-    gross_loss = abs(sum(t.pnl_rs for t in losses))
-    profit_factor = _safe_div(gross_profit, gross_loss, default=float("inf"))
+    # ── P&L & Statutory Friction ─────────────────────────────────────
+    total_gross_pnl = sum(t.pnl_rs for t in trades)
+    total_friction = sum(t.friction_rs for t in trades)
+    total_net_pnl = sum(t.net_pnl_rs for t in trades)
+
+    net_wins = [t for t in trades if t.net_pnl_rs > 0]
+    net_losses = [t for t in trades if t.net_pnl_rs <= 0]
+    net_win_rate = len(net_wins) / n * 100
+
+    net_gross_profit = sum(t.net_pnl_rs for t in net_wins)
+    net_gross_loss = abs(sum(t.net_pnl_rs for t in net_losses))
+    net_profit_factor = _safe_div(
+        net_gross_profit, net_gross_loss, default=float("inf")
+    )
 
     # ── Expectancy (per trade in ₹) ───────────────────────────────────
-    expectancy = _safe_div(total_pnl_rs, n)
+    expectancy = _safe_div(total_net_pnl, n)
 
     # ── R:R ──────────────────────────────────────────────────────────
     avg_rr = statistics.mean(t.rr_achieved for t in trades)
     median_rr = statistics.median(t.rr_achieved for t in trades)
 
-    # ── Drawdown (running) ────────────────────────────────────────────
+    # ── Drawdown (running on Net Equity) ──────────────────────────────
     equity = 0.0
     peak = 0.0
     max_dd = 0.0
     dd_series = []
     for t in trades:
-        equity += t.pnl_rs
+        equity += t.net_pnl_rs
         peak = max(peak, equity)
         dd = peak - equity
         dd_series.append(dd)
@@ -79,29 +89,36 @@ def generate_report(
         exit_counts[t.exit_reason] += 1
 
     # ── Per-strategy contribution ─────────────────────────────────────
-    strat_stats: dict = defaultdict(lambda: {"wins": 0, "losses": 0, "pnl": 0.0})
+    strat_stats: dict = defaultdict(
+        lambda: {"wins": 0, "losses": 0, "pnl": 0.0, "net_pnl": 0.0}
+    )
     for t in trades:
         for strat in t.strategies_voting:
             strat_stats[strat]["pnl"] += t.pnl_rs
-            if t.pnl_pct > 0:
+            strat_stats[strat]["net_pnl"] += t.net_pnl_rs
+            if t.net_pnl_rs > 0:
                 strat_stats[strat]["wins"] += 1
             else:
                 strat_stats[strat]["losses"] += 1
 
     # ── Per-symbol breakdown ──────────────────────────────────────────
-    sym_stats: dict = defaultdict(lambda: {"trades": 0, "pnl": 0.0, "wins": 0})
+    sym_stats: dict = defaultdict(
+        lambda: {"trades": 0, "pnl": 0.0, "net_pnl": 0.0, "wins": 0}
+    )
     for t in trades:
         sym_stats[t.symbol]["trades"] += 1
         sym_stats[t.symbol]["pnl"] += t.pnl_rs
-        if t.pnl_pct > 0:
+        sym_stats[t.symbol]["net_pnl"] += t.net_pnl_rs
+        if t.net_pnl_rs > 0:
             sym_stats[t.symbol]["wins"] += 1
 
     # ── Confluent family breakdown ────────────────────────────────────
-    family_stats: dict = defaultdict(lambda: {"trades": 0, "pnl": 0.0})
+    family_stats: dict = defaultdict(lambda: {"trades": 0, "pnl": 0.0, "net_pnl": 0.0})
     for t in trades:
         for fam in t.families_voting:
             family_stats[fam]["trades"] += 1
             family_stats[fam]["pnl"] += t.pnl_rs
+            family_stats[fam]["net_pnl"] += t.net_pnl_rs
 
     # ── Build report ──────────────────────────────────────────────────
     best_trade = max(trades, key=lambda t: t.pnl_pct)
@@ -115,7 +132,8 @@ def generate_report(
         f"**Symbols tested:** {', '.join(symbols)}  ",
         f"**Period:** {period}  |  **Interval:** {interval}  ",
         "**Strategies:** 21 (with 2-family confluence gate, min R:R 1.8)  ",
-        "**ATR Trailing SL:** enabled (1.5 × ATR)  ",
+        "**ATR Trailing SL:** enabled (2.0 × ATR after +1.0R cushion)  ",
+        "**Execution Guard:** Statutory Friction Deducted & Max 8 Trades/Day Capped  ",
         "",
         "---",
         "",
@@ -124,15 +142,19 @@ def generate_report(
         "| Metric | Value |",
         "|--------|-------|",
         f"| Total Trades | **{n}** |",
-        f"| Win Rate | **{win_rate:.1f}%** |",
-        f"| Profit Factor | **{profit_factor:.2f}** |",
-        f"| Total P&L | **₹{total_pnl_rs:,.0f}** (on ₹10,000/trade) |",
-        f"| Expectancy (per trade) | ₹{expectancy:,.0f} |",
+        "| Daily Trade Cap | **Max 8 trades/day** |",
+        f"| Win Rate (Gross) | **{win_rate:.1f}%** |",
+        f"| Win Rate (Net of Fees) | **{net_win_rate:.1f}%** |",
+        f"| Gross P&L | ₹{total_gross_pnl:,.0f} |",
+        f"| Statutory Friction (Brokerage + Taxes) | **-₹{total_friction:,.0f}** |",
+        f"| **Realized Net P&L** | **₹{total_net_pnl:,.0f}** (on ₹{capital:,.0f}/trade) |",
+        f"| Net Profit Factor | **{net_profit_factor:.2f}** |",
+        f"| Net Expectancy (per trade) | **₹{expectancy:,.0f}** |",
         f"| Avg Win | +{avg_win_pct:.2f}% |",
         f"| Avg Loss | {avg_loss_pct:.2f}% |",
         f"| Avg R:R Achieved | {avg_rr:.2f} |",
         f"| Median R:R Achieved | {median_rr:.2f} |",
-        f"| Max Drawdown | ₹{max_dd:,.0f} |",
+        f"| Max Drawdown (Net) | ₹{max_dd:,.0f} |",
         f"| Sharpe Ratio | {sharpe:.2f} |",
         f"| Avg Bars Held | {avg_bars:.1f} |",
         f"| Trailing SL Exits | {trailing_sl_exits} ({trailing_sl_exits / n * 100:.0f}% of trades) |",
@@ -144,6 +166,7 @@ def generate_report(
         "| Exit Reason | Count | % |",
         "|-------------|-------|---|",
     ]
+
     for reason, count in sorted(exit_counts.items(), key=lambda x: -x[1]):
         report_lines.append(f"| {reason} | {count} | {count / n * 100:.0f}% |")
 
@@ -165,15 +188,17 @@ def generate_report(
         "",
         "---",
         "",
-        "## Per-Symbol Breakdown",
+        "## Per-Symbol Breakdown (Net of Brokerage & Taxes)",
         "",
-        "| Symbol | Trades | Win Rate | P&L (₹) |",
-        "|--------|--------|----------|---------|",
+        "| Symbol | Trades | Net Win Rate | Gross P&L (₹) | Net P&L (₹) |",
+        "|--------|--------|--------------|---------------|-------------|",
     ]
-    for sym in sorted(sym_stats, key=lambda s: -sym_stats[s]["pnl"]):
+    for sym in sorted(sym_stats, key=lambda s: -sym_stats[s]["net_pnl"]):
         s = sym_stats[sym]
         wr = s["wins"] / s["trades"] * 100 if s["trades"] else 0
-        report_lines.append(f"| {sym} | {s['trades']} | {wr:.0f}% | ₹{s['pnl']:,.0f} |")
+        report_lines.append(
+            f"| {sym} | {s['trades']} | {wr:.0f}% | ₹{s['pnl']:,.0f} | **₹{s['net_pnl']:,.0f}** |"
+        )
 
     report_lines += [
         "",
@@ -181,26 +206,26 @@ def generate_report(
         "",
         "## Signal Family Contribution",
         "",
-        "| Family | Trades Involved | P&L (₹) |",
-        "|--------|-----------------|---------|",
+        "| Family | Trades Involved | Net P&L (₹) |",
+        "|--------|-----------------|-------------|",
     ]
-    for fam in sorted(family_stats, key=lambda f: -family_stats[f]["pnl"]):
+    for fam in sorted(family_stats, key=lambda f: -family_stats[f]["net_pnl"]):
         f = family_stats[fam]
-        report_lines.append(f"| {fam} | {f['trades']} | ₹{f['pnl']:,.0f} |")
+        report_lines.append(f"| {fam} | {f['trades']} | ₹{f['net_pnl']:,.0f} |")
 
     report_lines += [
         "",
         "---",
         "",
-        "## Strategy Contribution",
+        "## Strategy Contribution (Net P&L)",
         "",
-        "| Strategy | Wins | Losses | P&L (₹) |",
-        "|----------|------|--------|---------|",
+        "| Strategy | Wins | Losses | Net P&L (₹) |",
+        "|----------|------|--------|-------------|",
     ]
-    for strat in sorted(strat_stats, key=lambda s: -strat_stats[s]["pnl"]):
+    for strat in sorted(strat_stats, key=lambda s: -strat_stats[s]["net_pnl"]):
         s = strat_stats[strat]
         report_lines.append(
-            f"| {strat} | {s['wins']} | {s['losses']} | ₹{s['pnl']:,.0f} |"
+            f"| {strat} | {s['wins']} | {s['losses']} | ₹{s['net_pnl']:,.0f} |"
         )
 
     report_lines += [
@@ -211,8 +236,8 @@ def generate_report(
         "",
         "> [!NOTE]",
         "> This backtest simulates entry at the **next bar's open** after a signal fires.",
-        "> Slippage, brokerage (₹20/order), STT, and exchange fees are **NOT deducted**.",
-        "> Add ~₹50–80 per round-trip to get realistic net P&L.",
+        "> Statutory friction (Brokerage ₹20/order, STT 0.025%, NSE turnover 0.00325%, stamp duty, SEBI, 18% GST) is **fully deducted** from all P&L metrics.",
+        "> Trades are capped at a maximum of 8 trades per day across the portfolio.",
         "> 5-min VWAP strategies are less accurate on 1-day timeframe (VWAP resets daily).",
         "",
         "> [!IMPORTANT]",
@@ -234,8 +259,13 @@ def generate_report(
     return {
         "n_trades": n,
         "win_rate": win_rate,
-        "profit_factor": profit_factor,
-        "total_pnl_rs": total_pnl_rs,
+        "net_win_rate": net_win_rate,
+        "profit_factor": net_profit_factor,
+        "net_profit_factor": net_profit_factor,
+        "total_gross_pnl": total_gross_pnl,
+        "total_friction": total_friction,
+        "total_pnl_rs": total_net_pnl,
+        "total_net_pnl": total_net_pnl,
         "expectancy": expectancy,
         "avg_win_pct": avg_win_pct,
         "avg_loss_pct": avg_loss_pct,

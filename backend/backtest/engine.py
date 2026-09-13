@@ -23,6 +23,7 @@ Key assumptions / simplifications
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
@@ -80,6 +81,26 @@ ALL_STRATEGIES: Dict[str, Any] = {
     "volume_delta_divergence": VolumeDeltaDivergenceStrategy(),
 }
 
+# ── Statutory Indian Market Friction Calculator ──────────────────────────────
+
+
+def compute_statutory_friction(
+    entry_price: float, exit_price: float, qty: int
+) -> float:
+    """Compute round-trip friction for NSE Cash Intraday MIS trade."""
+    buy_turnover = round(entry_price * qty, 2)
+    sell_turnover = round(exit_price * qty, 2)
+    total_turnover = round(buy_turnover + sell_turnover, 2)
+
+    brokerage = 40.0  # ₹20 buy + ₹20 sell
+    stt = round(sell_turnover * 0.00025, 2)  # 0.025% on sell
+    exchange_fee = round(total_turnover * 0.0000325, 2)  # 0.00325%
+    sebi_charge = round(total_turnover * 0.000001, 2)  # ₹10 / crore
+    stamp_duty = round(buy_turnover * 0.00003, 2)  # 0.003% on buy
+    gst = round((brokerage + exchange_fee + sebi_charge) * 0.18, 2)
+    return round(brokerage + stt + exchange_fee + sebi_charge + stamp_duty + gst, 2)
+
+
 # ── Trade data class ─────────────────────────────────────────────────────────
 
 
@@ -96,9 +117,14 @@ class BacktestTrade:
     exit_reason: str  # 'TARGET', 'SL', 'TRAILING_SL', 'SQUAREOFF', 'EOD'
     bars_held: int
     pnl_pct: float  # % return on position
-    pnl_rs: float  # ₹ P&L on ₹10,000 capital
-    rr_achieved: float  # actual R:R achieved
-    confluence_score: int
+    pnl_rs: float  # Gross ₹ P&L
+    friction_rs: float = (
+        0.0  # Indian statutory friction (brokerage, STT, turnover, GST)
+    )
+    net_pnl_rs: float = 0.0  # Realized net ₹ P&L after friction
+    entry_time: str = ""  # ISO timestamp of entry
+    rr_achieved: float = 0.0  # actual R:R achieved
+    confluence_score: int = 0
     families_voting: List[str] = field(default_factory=list)
     strategies_voting: List[str] = field(default_factory=list)
     confidence: int = 0
@@ -181,6 +207,9 @@ class BacktestEngine:
         trail_after_r: float = 1.0,
         trend_aligned: bool = True,
         min_sl_pct: float = 1.0,
+        max_trades_per_day: int = 8,
+        enforce_friction_guard: bool = True,
+        friction_multiple: float = 3.5,
         disabled_strategies: Optional[Set[str]] = None,
     ):
         self.min_confluence = min_confluence
@@ -191,6 +220,10 @@ class BacktestEngine:
         self.trail_after_r = trail_after_r
         self.trend_aligned = trend_aligned
         self.min_sl_pct = min_sl_pct
+        self.max_trades_per_day = max_trades_per_day
+        self.enforce_friction_guard = enforce_friction_guard
+        self.friction_multiple = friction_multiple
+
         self.disabled_strats = (
             disabled_strategies
             if disabled_strategies is not None
@@ -323,6 +356,15 @@ class BacktestEngine:
                     target = round(entry_price - risk * 2.0, 2)
 
             trade_risk = abs(entry_price - initial_sl)
+            qty = max(1, int(self.capital / entry_price))
+
+            # Pre-trade Friction Guard Check (reject if payoff < 3.5x friction)
+            if self.enforce_friction_guard:
+                est_friction = compute_statutory_friction(entry_price, target, qty)
+                expected_gain = abs(target - entry_price) * qty
+                if expected_gain < (self.friction_multiple * est_friction):
+                    i += 1
+                    continue
 
             # Manage trade bar-by-bar
             trade_sl = initial_sl
@@ -386,13 +428,23 @@ class BacktestEngine:
             else:
                 pnl_pct = (entry_price - exit_price) / entry_price * 100
 
-            qty = max(1, int(self.capital / entry_price))
             pnl_rs = pnl_pct / 100 * qty * entry_price
+            friction_rs = compute_statutory_friction(entry_price, exit_price, qty)
+            net_pnl_rs = round(pnl_rs - friction_rs, 2)
+
             risk_per_unit = abs(entry_price - initial_sl)
             reward_per_unit = abs(exit_price - entry_price)
             rr_achieved = (
                 round(reward_per_unit / risk_per_unit, 2) if risk_per_unit > 0 else 0.0
             )
+
+            entry_dt = ""
+            if "datetime" in df.columns:
+                entry_dt = str(df.iloc[entry_bar + 1]["datetime"])
+            elif isinstance(df.index, pd.DatetimeIndex):
+                entry_dt = str(df.index[entry_bar + 1])
+            else:
+                entry_dt = f"Bar_{entry_bar + 1:04d}"
 
             trades.append(
                 BacktestTrade(
@@ -408,6 +460,9 @@ class BacktestEngine:
                     bars_held=j - (i + 1),
                     pnl_pct=round(pnl_pct, 2),
                     pnl_rs=round(pnl_rs, 2),
+                    friction_rs=friction_rs,
+                    net_pnl_rs=net_pnl_rs,
+                    entry_time=entry_dt,
                     rr_achieved=rr_achieved,
                     confluence_score=chosen.get("confluenceScore", 0),
                     families_voting=chosen.get("familiesVoting", []),
@@ -437,4 +492,17 @@ class BacktestEngine:
             trades = self.run_symbol(df, symbol)
             print(f"{len(trades)} trade(s)")
             all_trades.extend(trades)
+
+        # Enforce max trades per day across portfolio
+        if self.max_trades_per_day > 0 and all_trades:
+            all_trades.sort(key=lambda t: t.entry_time)
+            filtered_trades: List[BacktestTrade] = []
+            daily_counts: Dict[str, int] = defaultdict(int)
+            for t in all_trades:
+                day_key = t.entry_time[:10] if len(t.entry_time) >= 10 else "UNKNOWN"
+                if daily_counts[day_key] < self.max_trades_per_day:
+                    daily_counts[day_key] += 1
+                    filtered_trades.append(t)
+            all_trades = filtered_trades
+
         return all_trades

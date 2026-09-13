@@ -34,24 +34,26 @@ class Settings(BaseSettings):
 
     # ── Capital & Risk Allocation ───────────────────────────────────
     portfolio_equity: float = Field(
-        default=100_000.0, description="Total account portfolio equity in INR"
+        default=20_000.0, description="Total account portfolio equity in INR"
     )
     risk_percent: float = Field(
         default=1.0,
-        description="1R percentage of equity risked per trade (e.g. 1.0 = 1%)",
+        description="1R percentage of equity risked per trade (1.0% = ₹200 on ₹20k)",
     )
     max_capital_per_trade: float = Field(
-        default=50_000.0, description="Hard cap on notional capital allocated per trade"
+        default=30_000.0,
+        description="Hard cap on notional capital allocated per trade (1.5x leverage ceiling)",
     )
     max_daily_loss: float = Field(
-        default=1_500.0,
-        description="Cumulative realized + unrealized loss circuit kill-switch",
+        default=600.0,
+        description="Cumulative realized + unrealized loss circuit kill-switch (-3% of account)",
     )
     max_open_positions: int = Field(
-        default=4, description="Maximum concurrent open positions"
+        default=1,
+        description="Maximum concurrent open positions (single-position discipline)",
     )
     max_daily_trades: int = Field(
-        default=8, description="Maximum completed trades per calendar session"
+        default=5, description="Maximum completed trades per calendar session"
     )
 
     # ── Time Boundaries (IST) ────────────────────────────────────────
@@ -89,11 +91,11 @@ class Settings(BaseSettings):
 
     # ── Friction Guard Criteria ─────────────────────────────────────
     min_turnover_threshold: float = Field(
-        default=35_000.0,
+        default=10_000.0,
         description="Minimum turnover in INR to contain percentage drag",
     )
     min_profit_friction_multiple: float = Field(
-        default=3.0, description="Expected profit must be >= N * estimated friction"
+        default=3.5, description="Expected profit must be >= N * estimated friction"
     )
 
     # ── Alpha & Strategy Controls ───────────────────────────────────
@@ -108,22 +110,23 @@ class Settings(BaseSettings):
         default=1.0, description="Minimum safe SL width (%) to avoid market noise"
     )
     trailing_sl_atr_multiplier: float = Field(
-        default=2.0, description="Trailing stop-loss ATR distance multiplier"
+        default=2.2,
+        description="Trailing stop-loss ATR distance multiplier (widened from 1.5x)",
     )
     breakeven_trigger_r: float = Field(
         default=1.0,
         description="Profit in R units required before moving SL to Breakeven",
     )
     trailing_trigger_r: float = Field(
-        default=1.5,
+        default=1.0,
         description="Profit in R units required before activating dynamic ATR trail",
     )
 
     # ── Watchlist ───────────────────────────────────────────────────
     watchlist_raw: str = Field(
-        default="RELIANCE,TCS,HDFCBANK,INFY,ICICIBANK,SBIN,BHARTIARTL,KOTAKBANK,LT,AXISBANK,ASIANPAINT,MARUTI,TITAN,BAJFINANCE,TRENT",
+        default="PAYTM,ATHERENERG,SHREECEM,PIIND,MCX,PFC,BOSCHLTD,KAYNES,ADANIENSOL,IDEA",
         alias="WATCHLIST",
-        description="Comma-separated NSE trading symbols without -EQ suffix",
+        description="High-momentum F&O equities, excluding static low-winrate names (e.g. SOLARINDS)",
     )
 
     @field_validator("mode")

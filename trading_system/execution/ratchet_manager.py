@@ -72,31 +72,24 @@ class RatchetManager:
             gain_in_r = (entry - trade.lwm) / initial_risk
 
         # 3. Dynamic Stop-Loss Ratchet Evaluation
+        # Position MUST advance at least +1.0R into profit before trailing activates.
+        if gain_in_r < self.settings.breakeven_trigger_r:
+            return
+
         new_sl: Optional[float] = None
+        atr = trade.atr if trade.atr > 0 else (entry * 0.015)
+        distance = round(atr * self.settings.trailing_sl_atr_multiplier, 2)
 
-        # Stage 1: Breakeven Ratchet (+1.0R Cushion)
-        if (
-            gain_in_r >= self.settings.breakeven_trigger_r
-            and gain_in_r < self.settings.trailing_trigger_r
-        ):
-            if direction == "BUY" and trade.current_sl < entry:
-                new_sl = entry
-            elif direction == "SELL" and trade.current_sl > entry:
-                new_sl = entry
-
-        # Stage 2: Full Dynamic ATR Trail (+1.5R or beyond)
-        elif gain_in_r >= self.settings.trailing_trigger_r:
-            atr = trade.atr if trade.atr > 0 else (entry * 0.01)
-            distance = atr * self.settings.trailing_sl_atr_multiplier
-
-            if direction == "BUY":
-                candidate_sl = round(max(entry, trade.hwm - distance), 2)
-                if candidate_sl > trade.current_sl:
-                    new_sl = candidate_sl
-            else:
-                candidate_sl = round(min(entry, trade.lwm + distance), 2)
-                if candidate_sl < trade.current_sl:
-                    new_sl = candidate_sl
+        if direction == "BUY":
+            # Ratchet candidate: at least breakeven, trailing 2.2x ATR below High Water Mark
+            candidate_sl = round(max(entry, trade.hwm - distance), 2)
+            if candidate_sl > trade.current_sl:
+                new_sl = candidate_sl
+        else:
+            # Ratchet candidate: at least breakeven, trailing 2.2x ATR above Low Water Mark
+            candidate_sl = round(min(entry, trade.lwm + distance), 2)
+            if candidate_sl < trade.current_sl:
+                new_sl = candidate_sl
 
         # If a tighter stop-loss has been calculated, transmit modifyOrder to exchange
         if new_sl is not None and new_sl != trade.current_sl:
