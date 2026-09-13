@@ -7,13 +7,15 @@ The app features a modern Electron/React frontend communicating with a high-perf
 ## 🚀 Features
 
 * **Advanced Confluence UI**: Groups signals by stock and trade direction. Stocks that trigger multiple strategies simultaneously are ranked at the top, allowing you to instantly spot the highest-probability setups.
-* **20 Quantitative Strategies Built-in**: 
-  * *Institutional Footprint*: Institutional Volume Absorption, Order Block & Fair Value Gap (FVG), CMF Institutional Flow.
-  * *Trend/Momentum*: Supertrend, ADX Momentum, Parabolic SAR, MACD Cross, TSI Cross, Awesome Oscillator.
-  * *Mean Reversion*: RSI Reversal, CCI Reversal, Williams %R, Stochastic Reversal, StochRSI.
-  * *Volatility/Breakout*: Bollinger Breakout, Keltner Breakout, Donchian Breakout.
-  * *Volume*: VWAP Bounce, MFI Exhaustion.
-  * *Moving Averages*: EMA Crossover.
+* **Kaufman Efficiency Ratio (KER) Macro Regime Screener**: Evaluates 20-day daily price efficiency ($\text{KER} \ge 0.28$) pre-market to filter out choppy, mean-reverting stocks while preserving clean momentum runners.
+* **Pre-Trade Statutory Friction Guard**: Automatically models and deducts complete Indian regulatory friction (Brokerage ₹20, STT 0.025%, NSE turnover 0.00325%, Stamp Duty 0.003%, SEBI, and 18% GST). Rejects any trade where expected payoff is $< 3.5\times$ estimated friction.
+* **Structural Drag Blacklist & Quality Universe Gate**: Automatically excludes known false-breakout traps (`SUZLON`, `TIINDIA`, `ICICIGI`) and enforces strict volume/liquidity thresholds.
+* **Portfolio Trade Cap (Max 8 Trades/Day)**: Chronologically restricts portfolio churn to prevent overtrading and fee erosion.
+* **High-Expectancy Alpha Strategies**: 
+  * *Volatility & Breakout*: Donchian Breakout, Keltner Channel Breakout, Bollinger Breakout.
+  * *Institutional Footprint*: Order Block & Fair Value Gap (FVG), CMF Institutional Flow, Institutional Volume Absorption, Volume Delta Divergence.
+  * *Momentum & Trend*: Parabolic SAR, MACD Divergence Cross, Awesome Oscillator, TSI Cross, EMA Crossover, Stochastic RSI.
+* **Walk-Forward Backtest Engine**: Built-in vectorized multi-strategy backtester with Yahoo Finance caching, statutory friction modeling, and automated Markdown report generation.
 * **Agentic Execution Modes**:
   * **Full Auto**: The agent strictly executes trades automatically based on risk configurations.
   * **Signal + Confirm**: The agent generates setups and targets, but waits for manual 1-click execution.
@@ -69,6 +71,30 @@ On first launch, enter your:
 - **TOTP Secret Key** (from your authenticator app setup)
 
 The app will encrypt and save them locally and authenticate headlessly without requiring web redirects.
+
+## 📈 Walk-Forward Backtesting
+
+The repository includes a walk-forward backtesting suite with full statutory Indian friction modeling (Brokerage ₹20, STT 0.025%, NSE turnover 0.00325%, Stamp Duty, SEBI fees, and 18% GST):
+
+```bash
+# Run 60-day 15-minute backtest with ₹40k capital and max 8 trades/day cap
+uv run python -m backend.backtest.run_backtest \
+    --period 60d \
+    --interval 15m \
+    --capital 40000 \
+    --universe fno \
+    --top-momentum 15 \
+    --output backtest_report.md
+```
+
+Options:
+- `--capital`: Capital allocated per trade in INR (default: `20000.0`, recommended: `40000.0`).
+- `--period`: Lookback period: `30d`, `60d`, `6mo`, `1y` (default: `30d`).
+- `--interval`: Bar size: `5m`, `15m`, `1h`, `1d` (default: `15m`).
+- `--blacklist`: Symbols to exclude from simulation (default: `SUZLON TIINDIA ICICIGI`).
+- `--confluence`: Minimum strategy family agreement gate (default: `2`).
+- `--min-rr`: Minimum target risk-reward ratio (default: `1.8`).
+- `--trailing-atr`: ATR trailing stop loss multiplier (default: `2.0` after +1.0R cushion).
 
 ## 🧪 Running Tests
 

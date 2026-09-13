@@ -9,8 +9,9 @@ Agentic intraday trading desktop app for Angel One SmartAPI. An Electron + React
 (TypeScript) frontend talks over a JSON-RPC bridge (stdin/stdout) to a Python
 backend that scans the market with 20 technical-analysis strategies.
 
-- `backend/` — Python backend (strategies, scanner, trading engine, risk manager, SmartAPI client).
-- `backend/tests/` — pytest suite for the strategies (pure, offline).
+- `backend/` — Python backend (strategies, scanner, screener with Kaufman Efficiency Ratio, trading engine, risk manager, SmartAPI client).
+- `backend/backtest/` — Walk-forward backtest engine with Indian regulatory friction modeling.
+- `backend/tests/` — pytest suite for strategies, screener, and execution safety (pure, offline).
 - `src/` — Electron main process and React renderer.
 
 ## Environment
