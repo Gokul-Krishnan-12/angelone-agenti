@@ -127,21 +127,24 @@ class RiskManager:
         trade: Dict[str, Any],
         ltp: float,
         atr: float,
-        multiplier: float = 1.5,
+        multiplier: float = 2.0,
+        cushion_r: float = 1.0,
     ) -> Optional[float]:
         """
         Compute a new ATR trailing stop-loss if the market has moved in our favour.
 
-        The SL only ever ratchets toward the position (never widens).
-        Updates ``trade["high_water_mark"]`` or ``trade["low_water_mark"]``
-        in-place so the caller does not need to manage it separately.
+        Harmonized with 1:2 R:R lifecycle:
+        1. Only activates once price moves >= cushion_r * 1R (default: +1.0R) into profit.
+        2. Once activated, ratchets SL to at least breakeven (entry_price).
+        3. Trails multiplier * ATR (default: 2.0x ATR) behind high/low water mark.
 
         Parameters
         ----------
-        trade       : active trade dict (must have keys: direction, sl)
+        trade       : active trade dict (must have keys: direction, sl, entry_price)
         ltp         : latest traded price
-        atr         : current ATR value (e.g. ATR-14 on 5-min candles)
-        multiplier  : how many ATRs to trail behind the high-water mark
+        atr         : current ATR value
+        multiplier  : how many ATRs to trail behind high-water mark (default: 2.0)
+        cushion_r   : minimum 1R profit threshold before trailing activates (default: 1.0)
 
         Returns
         -------
@@ -153,24 +156,36 @@ class RiskManager:
 
         direction = trade.get("direction", "BUY")
         current_sl = float(trade.get("sl", 0))
+        entry_price = float(trade.get("entry_price", trade.get("price", ltp)))
+        initial_sl = float(trade.get("initial_sl", current_sl))
+
+        trade_risk = (
+            abs(entry_price - initial_sl) if initial_sl > 0 else (entry_price * 0.012)
+        )
+        effective_cushion = float(trade.get("cushion_r", cushion_r))
+        profit_threshold = (
+            trade_risk * effective_cushion if effective_cushion > 0 else 0.0
+        )
         distance = atr * multiplier
 
         if direction == "BUY":
-            # Update high-water mark
             hwm = max(float(trade.get("high_water_mark", ltp)), ltp)
             trade["high_water_mark"] = hwm
-            new_sl = round(hwm - distance, 2)
-            # Only ratchet SL upward
-            if new_sl > current_sl:
-                return new_sl
+            # Only activate trailing SL once trade advances at least threshold into profit
+            if (hwm - entry_price) >= profit_threshold:
+                # Ratchet to at least breakeven (entry_price) or hwm - distance
+                new_sl = round(max(current_sl, entry_price, hwm - distance), 2)
+                if new_sl > current_sl:
+                    return new_sl
         else:  # SELL
-            # Update low-water mark
             lwm = min(float(trade.get("low_water_mark", ltp)), ltp)
             trade["low_water_mark"] = lwm
-            new_sl = round(lwm + distance, 2)
-            # Only ratchet SL downward
-            if new_sl < current_sl:
-                return new_sl
+            # Only activate trailing SL once trade drops at least threshold into profit
+            if (entry_price - lwm) >= profit_threshold:
+                # Ratchet to at least breakeven (entry_price) or lwm + distance
+                new_sl = round(min(current_sl, entry_price, lwm + distance), 2)
+                if new_sl < current_sl:
+                    return new_sl
 
         return None
 

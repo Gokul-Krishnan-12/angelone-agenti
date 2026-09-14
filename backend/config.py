@@ -25,15 +25,20 @@ class ConfigManager:
                 "autoSquareOff": True,
                 "squareOffTime": "15:15",
                 "defaultStopLossPercent": 1.2,
-                "defaultTargetPercent": 2.5,
+                "defaultTargetPercent": 2.4,  # exact 1:2 R:R against 1.2% stop-loss
                 "positionRevalWeakExitMins": 15,
                 "positionRevalBreakevenMins": 45,
                 # ── Quality filters ──────────────────────────────────
                 "minConfluenceScore": 3,  # 3 independent families required for high-conviction trades
-                "minRiskReward": 1.8,  # minimum R:R ratio for any trade
+                "minRiskReward": 2.0,  # minimum 1:2 R:R ratio for any trade
                 "minStopLossPercent": 1.0,  # minimum 1.0% SL width to prevent noise stop-outs
                 "trendAlignmentFilter": True,  # trade only in direction of 50-period EMA
                 "noEntryFirstMins": 15,  # skip first 15 min (9:15–9:30 opening chaos)
+                # ── Market Regime Filter ──────────────────────────
+                "marketRegimeFilterEnabled": True,  # quantitative regime & volatility filter
+                "marketRegimeMinADX": 20.0,  # trend strength threshold
+                "marketRegimeMinKER": 0.25,  # Kaufman efficiency ratio threshold
+                "marketRegimeBlockChoppyBreakouts": True,  # suppress false-breakout churn in chop
                 # ── Trailing stop-loss ────────────────────────────
                 "trailingSlEnabled": True,  # enable ATR trailing SL
                 "trailingSlAtrMultiplier": 2.0,  # trail 2.0 × ATR behind high-water mark

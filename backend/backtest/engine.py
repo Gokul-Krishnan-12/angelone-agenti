@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 
+from ..market_regime import classify_market_regime, is_trade_allowed_by_regime
 from ..scanner import _get_strategy_family
 
 # ── Import strategies and scanner logic ─────────────────────────────────────
@@ -136,11 +137,15 @@ class BacktestTrade:
 def _apply_confluence(
     signals: List[Dict],
     direction: str,
-    min_confluence: int = 2,
-    min_rr: float = 1.8,
+    min_confluence: int = 3,
+    min_rr: float = 2.0,
     df: Optional[pd.DataFrame] = None,
     trend_aligned: bool = True,
     min_sl_pct: float = 1.0,
+    regime_enabled: bool = True,
+    regime_min_adx: float = 20.0,
+    regime_min_ker: float = 0.25,
+    regime_block_choppy: bool = True,
 ) -> Optional[Dict]:
     dir_signals = [s for s in signals if s.get("direction") == direction]
     if not dir_signals:
@@ -165,31 +170,60 @@ def _apply_confluence(
         return None
 
     best = max(dir_signals, key=lambda s: s.get("confidence", 0))
-    rr = float(best.get("riskReward", 0))
-    if rr < min_rr:
-        return None
+
+    # Market Regime Filter: suppress false breakout churn during chop
+    regime_meta = None
+    if regime_enabled and df is not None and len(df) >= 20:
+        regime_result = classify_market_regime(
+            df, min_adx=regime_min_adx, min_ker=regime_min_ker
+        )
+        strat_id = best.get("_strat_id", "")
+        family = _get_strategy_family(strat_id)
+        allowed, _ = is_trade_allowed_by_regime(
+            regime_result,
+            direction,
+            family,
+            block_choppy_breakouts=regime_block_choppy,
+            strict_trend_alignment=trend_aligned,
+        )
+        if not allowed:
+            return None
+        regime_meta = regime_result
 
     best = dict(best)
     entry_p = float(best.get("entryPrice", best.get("price", 0.0)))
     sl_p = float(best.get("stopLoss", best.get("sl", 0.0)))
+    raw_target = float(best.get("target", 0.0))
 
-    # Safe minimum stop-loss buffer
-    if min_sl_pct > 0 and entry_p > 0 and sl_p > 0:
-        current_sl_pct = abs(entry_p - sl_p) / entry_p * 100.0
-        if current_sl_pct < min_sl_pct:
+    # Safe minimum stop-loss buffer & 1:2 R:R geometry
+    if entry_p > 0 and sl_p > 0:
+        raw_risk = abs(entry_p - sl_p)
+        current_sl_pct = (raw_risk / entry_p) * 100.0
+        if min_sl_pct > 0 and current_sl_pct < min_sl_pct:
             safe_risk = entry_p * (min_sl_pct / 100.0)
-            if direction == "BUY":
-                best["stopLoss"] = round(entry_p - safe_risk, 2)
-                best["target"] = round(entry_p + safe_risk * max(min_rr, rr), 2)
-            else:
-                best["stopLoss"] = round(entry_p + safe_risk, 2)
-                best["target"] = round(entry_p - safe_risk * max(min_rr, rr), 2)
+        else:
+            safe_risk = raw_risk
+
+        raw_reward = abs(raw_target - entry_p) if raw_target > 0 else 0.0
+        raw_rr = (raw_reward / safe_risk) if safe_risk > 0 else 0.0
+        target_multiplier = max(min_rr, 2.0, raw_rr)
+
+        if direction == "BUY":
+            best["stopLoss"] = round(entry_p - safe_risk, 2)
+            best["target"] = round(entry_p + safe_risk * target_multiplier, 2)
+        else:
+            best["stopLoss"] = round(entry_p + safe_risk, 2)
+            best["target"] = round(entry_p - safe_risk * target_multiplier, 2)
+
+        best["riskReward"] = round(target_multiplier, 2)
 
     best["confluenceScore"] = len(families_seen)
     best["familiesVoting"] = sorted(families_seen)
     best["strategyNames"] = [
         s.get("strategy", s.get("_strat_id", "")) for s in dir_signals
     ]
+    if regime_meta is not None:
+        best["marketRegime"] = regime_meta.regime
     return best
 
 
@@ -199,8 +233,8 @@ def _apply_confluence(
 class BacktestEngine:
     def __init__(
         self,
-        min_confluence: int = 2,
-        min_rr: float = 1.8,
+        min_confluence: int = 3,
+        min_rr: float = 2.0,
         capital_per_trade: float = 10_000.0,
         trailing_sl_multiplier: float = 2.0,
         min_bars: int = 60,
@@ -211,6 +245,10 @@ class BacktestEngine:
         enforce_friction_guard: bool = True,
         friction_multiple: float = 3.5,
         disabled_strategies: Optional[Set[str]] = None,
+        regime_enabled: bool = True,
+        regime_min_adx: float = 20.0,
+        regime_min_ker: float = 0.25,
+        regime_block_choppy: bool = True,
     ):
         self.min_confluence = min_confluence
         self.min_rr = min_rr
@@ -223,6 +261,10 @@ class BacktestEngine:
         self.max_trades_per_day = max_trades_per_day
         self.enforce_friction_guard = enforce_friction_guard
         self.friction_multiple = friction_multiple
+        self.regime_enabled = regime_enabled
+        self.regime_min_adx = regime_min_adx
+        self.regime_min_ker = regime_min_ker
+        self.regime_block_choppy = regime_block_choppy
 
         self.disabled_strats = (
             disabled_strategies
@@ -318,6 +360,10 @@ class BacktestEngine:
                     df=window,
                     trend_aligned=self.trend_aligned,
                     min_sl_pct=self.min_sl_pct,
+                    regime_enabled=self.regime_enabled,
+                    regime_min_adx=self.regime_min_adx,
+                    regime_min_ker=self.regime_min_ker,
+                    regime_block_choppy=self.regime_block_choppy,
                 )
                 if chosen:
                     break

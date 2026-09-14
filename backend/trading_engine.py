@@ -403,6 +403,7 @@ class TradingEngine:
 
                     self.active_trades[symbol] = {
                         "sl": sl,
+                        "initial_sl": sl,
                         "sl_order_id": sl_order_id,
                         "target": target,
                         "target1": pending.get("target1", target),
@@ -537,6 +538,7 @@ class TradingEngine:
 
                             self.active_trades[active_key] = {
                                 "sl": sl,
+                                "initial_sl": sl,
                                 "sl_order_id": "",
                                 "target": target,
                                 "direction": direction,
@@ -777,7 +779,10 @@ class TradingEngine:
                             risk_config = config_manager.get_risk_config()
                             if risk_config.get("trailingSlEnabled", True):
                                 tsl_mult = float(
-                                    risk_config.get("trailingSlAtrMultiplier", 1.5)
+                                    risk_config.get("trailingSlAtrMultiplier", 2.0)
+                                )
+                                trade["cushion_r"] = float(
+                                    risk_config.get("trailingSlProfitCushionR", 1.0)
                                 )
                                 # Reuse ATR stored at entry; refresh if 0
                                 atr = float(trade.get("atr", 0))

@@ -349,6 +349,29 @@ const Settings: React.FC = () => {
                 </div>
               </div>
 
+              {/* Market Regime Filter Toggle */}
+              <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-surface-300 text-xs font-semibold">Market Regime Filter</label>
+                    <p className="text-[11px] text-surface-500">Inhibits false-breakout strategies when ADX &lt; 20 or during choppy consolidation squeeze.</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={localSettings.risk?.marketRegimeFilterEnabled ?? true}
+                      onChange={(e) => handleRiskChange('marketRegimeFilterEnabled', e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-profit-dark"></div>
+                  </label>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-surface-400 font-mono">
+                  <span>Regime Gate: ADX ≥ {localSettings.risk?.marketRegimeMinADX ?? 20} &bull; KER ≥ {localSettings.risk?.marketRegimeMinKER ?? 0.25}</span>
+                  <span className="text-accent-light font-bold">1:2 R:R Active</span>
+                </div>
+              </div>
+
               {/* Default Stop Loss */}
               <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
                 <div className="flex justify-between items-center">
@@ -380,10 +403,10 @@ const Settings: React.FC = () => {
                   value={localSettings.risk?.defaultTargetPercent ?? ''} 
                   onChange={(e) => handleRiskChange('defaultTargetPercent', e.target.value)}
                   className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
-                  placeholder="2.5"
+                  placeholder="2.4"
                 />
                 <p className="text-[11px] text-surface-500">
-                  Target exit price for capturing gains when price swings in trade direction.
+                  Target exit price for capturing gains (1:2.0 risk-reward against 1.2% stop-loss).
                 </p>
               </div>
 

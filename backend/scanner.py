@@ -43,6 +43,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import pandas as pd
 
 from .config import config_manager
+from .market_regime import classify_market_regime, is_trade_allowed_by_regime
 from .smartapi_client import smart_api_client
 from .strategies.adx_momentum import ADXMomentumStrategy
 from .strategies.awesome_oscillator import AwesomeOscillatorStrategy
@@ -234,15 +235,19 @@ class Scanner:
         self,
         dir_signals: List[Dict[str, Any]],
         min_confluence: int,
-        min_rr: float,
+        min_rr: float = 2.0,
         df: Optional[pd.DataFrame] = None,
         min_sl_pct: float = 1.0,
         trend_aligned: bool = True,
+        regime_enabled: bool = True,
+        regime_min_adx: float = 20.0,
+        regime_min_ker: float = 0.25,
+        regime_block_choppy: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
-        Apply the confluence, R:R, and quality gates to a group of same-direction signals.
+        Apply confluence, market regime, 1:2 R:R, and risk quality gates to a group of same-direction signals.
 
-        Returns the highest-confidence signal enriched with confluence metadata
+        Returns the highest-confidence signal enriched with confluence and regime metadata
         if the group passes, or None if it fails.
         """
         if not dir_signals:
@@ -271,36 +276,73 @@ class Scanner:
 
         # Take the signal with the highest confidence
         best = max(dir_signals, key=lambda s: s.get("confidence", 0))
-        rr = float(best.get("riskReward", 0.0))
-        if rr < min_rr:
-            return None
 
-        # ── 3. Minimum Stop-Loss Buffer Gate (noise protection) ────────
+        # ── 3. Market Regime Filter (suppress false-breakout churn in chop) ──
+        regime_meta: Optional[Any] = None
+        if regime_enabled and df is not None and len(df) >= 20:
+            regime_result = classify_market_regime(
+                df, min_adx=regime_min_adx, min_ker=regime_min_ker
+            )
+            strat_id = best.get("_strategy_id", "")
+            family = _get_strategy_family(strat_id)
+            allowed, _ = is_trade_allowed_by_regime(
+                regime_result,
+                direction,
+                family,
+                block_choppy_breakouts=regime_block_choppy,
+                strict_trend_alignment=trend_aligned,
+            )
+            if not allowed:
+                return None
+            regime_meta = regime_result
+
+        # ── 4. Minimum Stop-Loss Buffer & 1:2 R:R Target Geometry ──────
         best = dict(best)
         entry_p = float(best.get("entryPrice", best.get("price", 0.0)))
         sl_p = float(best.get("stopLoss", best.get("sl", 0.0)))
+        raw_target = float(best.get("target", 0.0))
 
-        if min_sl_pct > 0 and entry_p > 0 and sl_p > 0:
-            current_sl_pct = abs(entry_p - sl_p) / entry_p * 100.0
-            if current_sl_pct < min_sl_pct:
-                # Widen tight SL to minimum safe buffer to prevent noise stop-outs
+        if entry_p > 0 and sl_p > 0:
+            raw_risk = abs(entry_p - sl_p)
+            current_sl_pct = (raw_risk / entry_p) * 100.0
+
+            # Widen tight SL to minimum safe buffer (e.g. 1.0%) to prevent noise stop-outs
+            if min_sl_pct > 0 and current_sl_pct < min_sl_pct:
                 safe_risk = entry_p * (min_sl_pct / 100.0)
-                if direction == "BUY":
-                    best["stopLoss"] = round(entry_p - safe_risk, 2)
-                    best["target"] = round(entry_p + safe_risk * max(min_rr, rr), 2)
-                else:
-                    best["stopLoss"] = round(entry_p + safe_risk, 2)
-                    best["target"] = round(entry_p - safe_risk * max(min_rr, rr), 2)
+            else:
+                safe_risk = raw_risk
 
-        # Enrich the chosen signal with confluence metadata
+            # Calculate raw RR and enforce at least min_rr (1:2 default)
+            raw_reward = abs(raw_target - entry_p) if raw_target > 0 else 0.0
+            raw_rr = (raw_reward / safe_risk) if safe_risk > 0 else 0.0
+            target_multiplier = max(min_rr, 2.0, raw_rr)
+
+            if direction == "BUY":
+                best["stopLoss"] = round(entry_p - safe_risk, 2)
+                best["target"] = round(entry_p + safe_risk * target_multiplier, 2)
+            else:
+                best["stopLoss"] = round(entry_p + safe_risk, 2)
+                best["target"] = round(entry_p - safe_risk * target_multiplier, 2)
+
+            best["riskReward"] = round(target_multiplier, 2)
+            best["stopLossPercent"] = round((safe_risk / entry_p) * 100.0, 2)
+            best["targetPercent"] = round(
+                (abs(best["target"] - entry_p) / entry_p) * 100.0, 2
+            )
+
+        # Enrich the chosen signal with confluence and regime metadata
         best["confluenceScore"] = confluence_score
         best["familiesVoting"] = sorted(families_seen)
         best["strategyCount"] = len(dir_signals)
         best["allStrategies"] = [
             s.get("strategy", s.get("_strategy_id", "")) for s in dir_signals
         ]
-        best.pop("_strategy_id", None)
+        if regime_meta is not None:
+            best["marketRegime"] = regime_meta.regime
+            best["adx"] = regime_meta.adx
+            best["ker"] = regime_meta.ker
 
+        best.pop("_strategy_id", None)
         return best
 
     # ──────────────────────────────────────────────────────────────────
@@ -314,11 +356,17 @@ class Scanner:
         all_signals: List[Dict[str, Any]] = []
         strategy_config = config_manager.get_strategy_config()
         risk_config = config_manager.get_risk_config()
-        min_confluence = int(risk_config.get("minConfluenceScore", 2))
-        min_rr = float(risk_config.get("minRiskReward", 1.8))
+        min_confluence = int(risk_config.get("minConfluenceScore", 3))
+        min_rr = float(risk_config.get("minRiskReward", 2.0))
         no_entry_mins = int(risk_config.get("noEntryFirstMins", 15))
         min_sl_pct = float(risk_config.get("minStopLossPercent", 1.0))
         trend_aligned = bool(risk_config.get("trendAlignmentFilter", True))
+        regime_enabled = bool(risk_config.get("marketRegimeFilterEnabled", True))
+        regime_min_adx = float(risk_config.get("marketRegimeMinADX", 20.0))
+        regime_min_ker = float(risk_config.get("marketRegimeMinKER", 0.25))
+        regime_block_choppy = bool(
+            risk_config.get("marketRegimeBlockChoppyBreakouts", True)
+        )
 
         def process_symbol(symbol: str) -> List[Dict[str, Any]]:
             # ── Market hours gate (first N minutes) ───────────────────
@@ -342,24 +390,12 @@ class Scanner:
             # ── 15:15 Intraday Cutoff Gate ────────────────────────────
             # Do not generate intraday entry signals from candles at or after 3:15 PM IST
             if "date" in df.columns and len(df) > 0:
-                last_dt = df["date"].iloc[-1]
                 try:
-                    c_time = None
-                    if isinstance(last_dt, str):
-                        time_str = (
-                            last_dt.split("T")[1][:5]
-                            if "T" in last_dt
-                            else last_dt.split(" ")[1][:5]
-                        )
-                        ch, cm = (
-                            int(time_str.split(":")[0]),
-                            int(time_str.split(":")[1]),
-                        )
-                        c_time = datetime.time(ch, cm)
-                    elif hasattr(last_dt, "time"):
-                        c_time = last_dt.time()
-                    if c_time and c_time >= datetime.time(15, 15):
-                        return []
+                    last_ts_str = str(df["date"].iloc[-1])
+                    if len(last_ts_str) >= 16:
+                        last_time_str = last_ts_str[11:16]
+                        if last_time_str >= "15:15":
+                            return []
                 except Exception:
                     pass
 
@@ -408,6 +444,10 @@ class Scanner:
                     df=df,
                     min_sl_pct=min_sl_pct,
                     trend_aligned=trend_aligned,
+                    regime_enabled=regime_enabled,
+                    regime_min_adx=regime_min_adx,
+                    regime_min_ker=regime_min_ker,
+                    regime_block_choppy=regime_block_choppy,
                 )
                 if validated_sig is not None:
                     validated.append(validated_sig)

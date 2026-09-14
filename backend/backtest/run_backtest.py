@@ -203,14 +203,14 @@ def main():
     parser.add_argument(
         "--confluence",
         type=int,
-        default=2,
-        help="Minimum confluence score (default: 2)",
+        default=3,
+        help="Minimum confluence score (default: 3)",
     )
     parser.add_argument(
         "--min-rr",
         type=float,
-        default=1.8,
-        help="Minimum R:R ratio gate (default: 1.8)",
+        default=2.0,
+        help="Minimum R:R ratio gate (default: 2.0)",
     )
     parser.add_argument(
         "--trailing-atr",

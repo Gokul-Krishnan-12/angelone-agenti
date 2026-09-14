@@ -249,6 +249,7 @@ export interface AgentState {
 export interface RiskConfig {
   maxCapitalPerTrade: number;
   riskPerTrade?: number;
+  riskPercent?: number;
   maxDailyLoss: number;
   maxOpenPositions: number;
   maxSimultaneousPositions?: number;
@@ -258,8 +259,19 @@ export interface RiskConfig {
   squareOffTime: string; // "15:10" format
   defaultStopLossPercent: number;
   defaultTargetPercent: number;
+  minRiskReward?: number;
+  minConfluenceScore?: number;
+  minStopLossPercent?: number;
+  trendAlignmentFilter?: boolean;
+  marketRegimeFilterEnabled?: boolean;
+  marketRegimeMinADX?: number;
+  marketRegimeMinKER?: number;
+  marketRegimeBlockChoppyBreakouts?: boolean;
   trailingStopEnabled: boolean;
   trailingStopPercent: number;
+  trailingSlEnabled?: boolean;
+  trailingSlAtrMultiplier?: number;
+  trailingSlProfitCushionR?: number;
 }
 
 // ─── Strategy Configuration ───────────────────────────────────────
