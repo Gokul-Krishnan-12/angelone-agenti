@@ -694,7 +694,7 @@ const SystemGuide: React.FC = () => {
                   </div>
                   <div className="text-lg font-bold font-mono text-white mb-1">Daily KER ≥ 0.28</div>
                   <p className="text-xs text-surface-400 leading-relaxed">
-                    Evaluated daily over 20 sessions (N=20). Filters out noisy, mean-reverting chop while preserving directional runners like PAYTM and KPITTECH.
+                    Evaluated daily over 20 sessions (N=20). Filters out noisy, mean-reverting chop while preserving directional momentum runners across the universe.
                   </p>
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-surface-800 text-[11px] font-mono text-accent-light/80">
@@ -737,16 +737,16 @@ const SystemGuide: React.FC = () => {
               <div className="bg-surface-900/90 border border-surface-700/80 rounded-xl p-4 flex flex-col justify-between hover:border-surface-600 transition-colors">
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] uppercase font-bold text-surface-400 tracking-wider">Drag Blacklist</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-loss-light/10 text-loss-light border border-loss-light/20">Excluded</span>
+                    <span className="text-[10px] uppercase font-bold text-surface-400 tracking-wider">Dynamic Quality Gate</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-profit-light/10 text-profit-light border border-profit-light/20">Automated</span>
                   </div>
-                  <div className="text-lg font-bold font-mono text-loss-light mb-1">3 Pruned Symbols</div>
+                  <div className="text-lg font-bold font-mono text-white mb-1">Adaptive Screening</div>
                   <p className="text-xs text-surface-400 leading-relaxed">
-                    Permanent elimination of SUZLON (penny spread drag), TIINDIA (illiquid order books), and ICICIGI (gap-down whipsaws).
+                    Dynamic noise exclusion handles chop and erratic whipsaws automatically via KER and liquidity checks, eliminating the need for rigid static stock blacklists.
                   </p>
                 </div>
-                <div className="mt-3 pt-2.5 border-t border-surface-800 text-[11px] font-mono text-loss-light/80">
-                  Removed ₹10k+ Structural Drag
+                <div className="mt-3 pt-2.5 border-t border-surface-800 text-[11px] font-mono text-profit-light/80">
+                  Dynamic Regime Selection
                 </div>
               </div>
             </div>
@@ -824,27 +824,27 @@ const SystemGuide: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-profit-light font-bold text-sm">
                     <CheckCircle2 size={16} />
-                    KER ≥ 0.28: Approved Momentum Runners
+                    KER ≥ 0.28: Approved Trending Regimes
                   </span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-profit-light/15 text-profit-light border border-profit-light/30">
                     High Signal-to-Noise
                   </span>
                 </div>
                 <p className="text-xs text-surface-300 leading-relaxed">
-                  Stocks characterized by sustained directional order flow, clean consecutive swings, and predictable pullbacks that respect 20 EMA/VWAP levels.
+                  Securities characterized by sustained directional order flow, clean consecutive price swings, and predictable pullbacks that respect moving averages and VWAP.
                 </p>
                 <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono">
                   <div className="p-2 rounded-lg bg-surface-900 border border-surface-700">
-                    <div className="text-white font-bold">PAYTM</div>
-                    <div className="text-[10px] text-profit-light">KER ~ 0.44</div>
+                    <div className="text-white font-bold">Directional Drift</div>
+                    <div className="text-[10px] text-profit-light">Net Travel &gt; Noise</div>
                   </div>
                   <div className="p-2 rounded-lg bg-surface-900 border border-surface-700">
-                    <div className="text-white font-bold">KALYANKJIL</div>
-                    <div className="text-[10px] text-profit-light">KER ~ 0.38</div>
+                    <div className="text-white font-bold">Clean Swings</div>
+                    <div className="text-[10px] text-profit-light">Respects 20 EMA</div>
                   </div>
                   <div className="p-2 rounded-lg bg-surface-900 border border-surface-700">
-                    <div className="text-white font-bold">KPITTECH</div>
-                    <div className="text-[10px] text-profit-light">KER ~ 0.35</div>
+                    <div className="text-white font-bold">High Follow-Thru</div>
+                    <div className="text-[10px] text-profit-light">Expanded Targets</div>
                   </div>
                 </div>
               </div>
@@ -853,23 +853,27 @@ const SystemGuide: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-loss-light font-bold text-sm">
                     <Ban size={16} />
-                    KER &lt; 0.28: Rejected Consolidation Traps
+                    KER &lt; 0.28: Rejected Consolidation Regimes
                   </span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-loss-light/15 text-loss-light border border-loss-light/30">
                     High Friction Traps
                   </span>
                 </div>
                 <p className="text-xs text-surface-300 leading-relaxed">
-                  Stocks locked in mean-reverting noise, overlapping wicks, and frequent stop-loss trigger clusters. Pruned pre-market before any capital can be lost.
+                  Securities locked in mean-reverting noise, overlapping wick candles, and frequent false-breakout whipsaws. Dynamically pruned pre-market without needing static exclusion lists.
                 </p>
-                <div className="grid grid-cols-2 gap-2 text-center text-xs font-mono">
+                <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono">
                   <div className="p-2 rounded-lg bg-surface-900 border border-surface-700">
-                    <div className="text-white font-bold">ICICIGI</div>
-                    <div className="text-[10px] text-loss-light">KER 0.14 (Severe Noise)</div>
+                    <div className="text-white font-bold">Severe Chop</div>
+                    <div className="text-[10px] text-loss-light">Random Walk Noise</div>
                   </div>
                   <div className="p-2 rounded-lg bg-surface-900 border border-surface-700">
-                    <div className="text-white font-bold">PNBHOUSING</div>
-                    <div className="text-[10px] text-loss-light">KER 0.18 (Chop Trap)</div>
+                    <div className="text-white font-bold">Overlapping Wicks</div>
+                    <div className="text-[10px] text-loss-light">Frequent Stop Hunts</div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-surface-900 border border-surface-700">
+                    <div className="text-white font-bold">Dynamic Skip</div>
+                    <div className="text-[10px] text-loss-light">Filtered at Root</div>
                   </div>
                 </div>
               </div>
@@ -968,7 +972,7 @@ const SystemGuide: React.FC = () => {
             </div>
           </div>
 
-          {/* Section 3 & 4: Daily Trade Cap & Blacklist Matrix */}
+          {/* Section 3 & 4: Daily Trade Cap & Dynamic Universe Filtering */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Daily Trade Cap */}
             <div className="bg-surface-800/90 border border-surface-700/80 rounded-2xl p-6 shadow-lg space-y-4">
@@ -1000,32 +1004,35 @@ const SystemGuide: React.FC = () => {
               </ul>
             </div>
 
-            {/* Targeted Blacklist & Strategy Pruning */}
+            {/* Dynamic Universe Screening & Strategy Optimization */}
             <div className="bg-surface-800/90 border border-surface-700/80 rounded-2xl p-6 shadow-lg space-y-4">
               <div className="flex items-center justify-between border-b border-surface-700/60 pb-3">
                 <h3 className="font-bold text-white text-base flex items-center gap-2">
                   <Filter className="text-accent-light" size={18} />
-                  Structural Blacklist & Strategy Pruning
+                  Dynamic Universe Screening & Strategy Alignment
                 </h3>
                 <span className="text-xs font-mono px-3 py-1 rounded-full bg-surface-900 text-surface-300 border border-surface-700">
-                  Curated Alpha Universe
+                  Dynamic Alpha Selection
                 </span>
               </div>
               <div className="space-y-3 text-xs">
                 <div>
-                  <span className="font-semibold text-loss-light block mb-1">Permanently Blacklisted Scrips:</span>
+                  <span className="font-semibold text-accent-light block mb-1">Mathematical Noise Pruning (KER-Driven):</span>
+                  <p className="text-surface-300 leading-relaxed mb-2.5">
+                    Instead of maintaining static, hardcoded symbol exclusion lists, the engine dynamically screens candidate scrips using the Kaufman Efficiency Ratio (KER). Underperforming or choppy stocks are filtered out naturally:
+                  </p>
                   <div className="grid grid-cols-3 gap-2 font-mono text-[11px] text-center">
                     <div className="p-2 rounded-lg bg-surface-900 border border-surface-700">
-                      <span className="font-bold text-white">SUZLON</span>
-                      <p className="text-[10px] text-surface-400 mt-0.5">Tick spread friction</p>
+                      <span className="font-bold text-white">Chop Traps</span>
+                      <p className="text-[10px] text-loss-light mt-0.5">KER &lt; 0.28 filtered</p>
                     </div>
                     <div className="p-2 rounded-lg bg-surface-900 border border-surface-700">
-                      <span className="font-bold text-white">TIINDIA</span>
-                      <p className="text-[10px] text-surface-400 mt-0.5">Thin book slippage</p>
+                      <span className="font-bold text-white">Spread Drag</span>
+                      <p className="text-[10px] text-warning-light mt-0.5">3.5x friction guard</p>
                     </div>
                     <div className="p-2 rounded-lg bg-surface-900 border border-surface-700">
-                      <span className="font-bold text-white">ICICIGI</span>
-                      <p className="text-[10px] text-loss-light mt-0.5">-₹9.3k gap drag</p>
+                      <span className="font-bold text-white">Adaptive Flow</span>
+                      <p className="text-[10px] text-profit-light mt-0.5">Zero manual lists</p>
                     </div>
                   </div>
                 </div>

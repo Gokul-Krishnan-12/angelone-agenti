@@ -9,7 +9,7 @@ The app features a modern Electron/React frontend communicating with a high-perf
 * **Advanced Confluence UI**: Groups signals by stock and trade direction. Stocks that trigger multiple strategies simultaneously are ranked at the top, allowing you to instantly spot the highest-probability setups.
 * **Kaufman Efficiency Ratio (KER) Macro Regime Screener**: Evaluates 20-day daily price efficiency ($\text{KER} \ge 0.28$) pre-market to filter out choppy, mean-reverting stocks while preserving clean momentum runners.
 * **Pre-Trade Statutory Friction Guard**: Automatically models and deducts complete Indian regulatory friction (Brokerage ₹20, STT 0.025%, NSE turnover 0.00325%, Stamp Duty 0.003%, SEBI, and 18% GST). Rejects any trade where expected payoff is $< 3.5\times$ estimated friction.
-* **Structural Drag Blacklist & Quality Universe Gate**: Automatically excludes known false-breakout traps (`SUZLON`, `TIINDIA`, `ICICIGI`) and enforces strict volume/liquidity thresholds.
+* **Dynamic Quality Universe Gate**: Automatically excludes noisy consolidation traps and false-breakout regimes using the Kaufman Efficiency Ratio (KER) filter and enforces strict volume/liquidity thresholds.
 * **Portfolio Trade Cap (Max 8 Trades/Day)**: Chronologically restricts portfolio churn to prevent overtrading and fee erosion.
 * **High-Expectancy Alpha Strategies**: 
   * *Volatility & Breakout*: Donchian Breakout, Keltner Channel Breakout, Bollinger Breakout.
