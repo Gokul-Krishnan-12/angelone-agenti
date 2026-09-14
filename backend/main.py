@@ -478,6 +478,11 @@ def handle_request(req):
 
             return success(swing_screener.get_last_results())
 
+        elif method in ("market_status", "market.getStatus"):
+            from .market_hours import get_market_status
+
+            return success(get_market_status())
+
         else:
             return error(-32601, f"Method '{method}' not found")
 

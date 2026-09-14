@@ -94,6 +94,10 @@ export function setupIpcHandlers() {
     return await pythonBridge.call('search_instruments', { query });
   });
 
+  ipcMain.handle(channels.MARKET_STATUS, async () => {
+    return await pythonBridge.call('market_status');
+  });
+
   // ─── Ticker ───────────────────────────────────────────────────────
   
   ipcMain.handle(channels.TICKER_SUBSCRIBE, async (_, tokens: number[]) => {

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTradingStore } from '../stores/trading-store';
 import { useSmartAPI } from '../hooks/useSmartAPI';
 import { useAutoReload } from '../hooks/useAutoReload';
+import { getMarketStatus, syncMarketHolidaysFromAPI, MarketStatus } from '../utils/market-hours';
 import {
   Activity,
   RefreshCw,
@@ -36,18 +37,18 @@ const Dashboard: React.FC = () => {
   const [positionTab, setPositionTab] = useState<'open' | 'all'>('open');
   const [exitConfirmSymbol, setExitConfirmSymbol] = useState<string | null>(null);
 
-  // Market open check (NSE 09:15 - 15:30 IST Mon-Fri)
-  const isMarketOpen = () => {
-    const now = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-    const istTime = new Date(utc + istOffset);
-    const day = istTime.getDay();
-    const minutes = istTime.getHours() * 60 + istTime.getMinutes();
-    if (day === 0 || day === 6) return false;
-    return minutes >= 555 && minutes <= 930;
-  };
-  const marketOpen = isMarketOpen();
+  // Dynamic Market open & holiday check
+  const [marketStatus, setMarketStatus] = useState<MarketStatus>(() => getMarketStatus());
+
+  useEffect(() => {
+    syncMarketHolidaysFromAPI().then(() => {
+      setMarketStatus(getMarketStatus());
+    });
+    const interval = setInterval(() => {
+      setMarketStatus(getMarketStatus());
+    }, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleToggleAgent = async () => {
     try {
@@ -153,7 +154,20 @@ const Dashboard: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-surface-400 mt-1 flex items-center gap-2">
-            <span>Market: <strong className={marketOpen ? 'text-profit-light' : 'text-surface-400'}>{marketOpen ? 'OPEN (Live)' : 'CLOSED (After Hours)'}</strong></span>
+            <span>
+              Market:{' '}
+              <strong
+                className={
+                  marketStatus.isOpen
+                    ? 'text-profit-light'
+                    : marketStatus.reason === 'HOLIDAY'
+                    ? 'text-warning-light font-bold'
+                    : 'text-surface-400'
+                }
+              >
+                {marketStatus.displayText}
+              </strong>
+            </span>
             <span>•</span>
             <span className="flex items-center gap-1">
               <Clock size={12} className="text-surface-500" />
@@ -206,6 +220,16 @@ const Dashboard: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* ─── EXCHANGE HOLIDAY / WEEKEND BANNER ────────────────────────── */}
+      {marketStatus.reason === 'HOLIDAY' && (
+        <div className="flex items-center gap-3 p-4 bg-warning-DEFAULT/10 border border-warning-DEFAULT/30 rounded-2xl text-xs text-warning-light animate-fade-in shadow-sm">
+          <AlertCircle size={18} className="shrink-0 text-warning-light" />
+          <div className="leading-relaxed">
+            <strong>Exchange Trading Holiday:</strong> The National Stock Exchange (NSE) &amp; BSE are closed today for <strong>{marketStatus.holidayName}</strong>. Automated scanning and live order routing are paused.
+          </div>
+        </div>
+      )}
 
       {/* ─── TOP 4 METRICS CARDS ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

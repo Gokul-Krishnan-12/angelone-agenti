@@ -2,6 +2,7 @@ import datetime
 from typing import Any, Dict, Optional, Tuple
 
 from .config import config_manager
+from .market_hours import get_market_status
 
 
 class RiskManager:
@@ -12,26 +13,34 @@ class RiskManager:
         self.open_positions = 0
         self.daily_trades_count = 0
 
-    def can_trade(self) -> Tuple[bool, str]:
+    def can_trade(self, check_market_hours: bool = True) -> Tuple[bool, str]:
         config = config_manager.get_risk_config()
 
-        # Check time (Indian market hours: 09:15 to 15:15 intraday cutoff)
-        now = datetime.datetime.now().time()
-        market_open = datetime.time(9, 15)
-        intraday_cutoff = datetime.time(15, 15)
-        try:
-            cfg_cutoff = datetime.datetime.strptime(
-                config.get("noNewTradesAfter", "15:00"), "%H:%M"
-            ).time()
-        except Exception:
-            cfg_cutoff = intraday_cutoff
+        # Check market status (holiday, weekend, session hours)
+        if check_market_hours and not config.get("bypassMarketHoursCheck", False):
+            market_status = get_market_status()
+            if not market_status["is_open"]:
+                return (
+                    False,
+                    f"Market is closed ({market_status['display_text']})",
+                )
 
-        effective_cutoff = min(cfg_cutoff, intraday_cutoff)
-        if now < market_open or now >= effective_cutoff:
-            return (
-                False,
-                f"Outside intraday trading hours (09:15 - {effective_cutoff.strftime('%H:%M')})",
-            )
+            # Check intraday entry cutoff
+            now = datetime.datetime.now().time()
+            intraday_cutoff = datetime.time(15, 15)
+            try:
+                cfg_cutoff = datetime.datetime.strptime(
+                    config.get("noNewTradesAfter", "15:00"), "%H:%M"
+                ).time()
+            except Exception:
+                cfg_cutoff = intraday_cutoff
+
+            effective_cutoff = min(cfg_cutoff, intraday_cutoff)
+            if now >= effective_cutoff:
+                return (
+                    False,
+                    f"Past intraday entry cutoff ({effective_cutoff.strftime('%H:%M')})",
+                )
 
         # Check max positions
         if self.open_positions >= config.get("maxSimultaneousPositions", 5):

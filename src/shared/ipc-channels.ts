@@ -29,6 +29,7 @@ export const MARKET_OHLC = 'market:ohlc';
 export const MARKET_HISTORICAL = 'market:historical';
 export const MARKET_INSTRUMENTS = 'market:instruments';
 export const MARKET_SEARCH = 'market:search';
+export const MARKET_STATUS = 'market:status';
 
 // ─── WebSocket / Ticker ───────────────────────────────────────────
 export const TICKER_SUBSCRIBE = 'ticker:subscribe';

@@ -36,6 +36,7 @@ try {
       historical: (params: any) => electron.ipcRenderer.invoke(channels.MARKET_HISTORICAL, params),
       instruments: (exchange: string) => electron.ipcRenderer.invoke(channels.MARKET_INSTRUMENTS, exchange),
       search: (query: string) => electron.ipcRenderer.invoke(channels.MARKET_SEARCH, query),
+      status: () => electron.ipcRenderer.invoke(channels.MARKET_STATUS),
     },
     ticker: {
       subscribe: (tokens: number[]) => electron.ipcRenderer.invoke(channels.TICKER_SUBSCRIBE, tokens),

@@ -1,26 +1,27 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTradingStore } from '../stores/trading-store';
+import { getMarketStatus, syncMarketHolidaysFromAPI, MarketStatus } from '../utils/market-hours';
 
 const StatusBar: React.FC = () => {
   const { auth, connectionStatus, agentState, dashboard } = useTradingStore();
   const pnl = dashboard?.totalPnl || 0;
 
-  // Simple IST check
-  const isMarketOpen = () => {
-    const now = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-    const istTime = new Date(utc + istOffset);
-    const day = istTime.getDay();
-    const hours = istTime.getHours();
-    const minutes = istTime.getMinutes();
-    const timeInMinutes = hours * 60 + minutes;
-    if (day === 0 || day === 6) return false;
-    return timeInMinutes >= 555 && timeInMinutes <= 930; // 9:15 to 15:30
-  };
+  const [marketStatus, setMarketStatus] = useState<MarketStatus>(() => getMarketStatus());
 
-  const marketOpen = isMarketOpen();
-  
+  useEffect(() => {
+    // Initial sync from API
+    syncMarketHolidaysFromAPI().then(() => {
+      setMarketStatus(getMarketStatus());
+    });
+
+    // Refresh every 15 seconds
+    const interval = setInterval(() => {
+      setMarketStatus(getMarketStatus());
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   // If we are logged in, assume connected to SmartAPI unless explicitly disconnected
   const isConnected = auth.isLoggedIn && connectionStatus !== 'disconnected';
 
@@ -31,8 +32,8 @@ const StatusBar: React.FC = () => {
           <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-profit-light' : 'bg-loss-light'}`} />
           <span className="text-surface-300 capitalize">{isConnected ? 'connected' : 'disconnected'}</span>
         </div>
-        <div className={`text-surface-400 ${marketOpen ? 'text-profit-light' : ''}`}>
-          Market: {marketOpen ? 'OPEN' : 'CLOSED'}
+        <div className={marketStatus.isOpen ? 'text-profit-light font-semibold' : marketStatus.reason === 'HOLIDAY' ? 'text-warning-light font-semibold' : 'text-surface-400'}>
+          Market: {marketStatus.isOpen ? 'OPEN' : marketStatus.reason === 'HOLIDAY' ? `CLOSED (${marketStatus.holidayName})` : marketStatus.displayText}
         </div>
       </div>
       <div className="flex items-center gap-2 text-surface-400">
