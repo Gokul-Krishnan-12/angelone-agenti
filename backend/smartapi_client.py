@@ -277,6 +277,70 @@ class SmartApiClient:
             logger.warning("Error renewing SmartAPI access token: %s", e)
         return False
 
+    def reauthenticate(self) -> bool:
+        """Attempt token renewal or headless re-login using saved encrypted credentials."""
+        # 1. Try renew_access_token first
+        if self.renew_access_token():
+            logger.info("Successfully renewed SmartAPI session token via refresh token")
+            return True
+
+        # 2. Fall back to headless login using encrypted credentials
+        try:
+            from .config import config_manager
+
+            creds = config_manager.get_credentials()
+            api_key = creds.get("apiKey") or self.api_key
+            client_code = creds.get("clientCode") or self.client_code
+            pin = creds.get("pin")
+            totp_secret = creds.get("totpSecret")
+
+            if api_key and client_code and pin and totp_secret:
+                logger.info("Re-authenticating headlessly with SmartAPI via TOTP...")
+                res = self.login(api_key, client_code, pin, totp_secret)
+                if res and res.get("is_valid"):
+                    config_manager.save_credentials(
+                        api_key=api_key,
+                        client_code=client_code,
+                        pin=pin,
+                        totp_secret=totp_secret,
+                        jwt_token=res.get("jwt_token", ""),
+                        refresh_token=res.get("refresh_token", ""),
+                        feed_token=res.get("feed_token", ""),
+                    )
+                    logger.info("Headless re-authentication successful.")
+                    return True
+        except Exception as e:
+            logger.error("Failed to re-authenticate with SmartAPI: %s", e)
+        return False
+
+    def _execute_with_auth_retry(self, api_func, *args, **kwargs):
+        """Execute an API function with automatic token refresh on auth failure."""
+        auth_keywords = (
+            "token",
+            "unauthorized",
+            "ag8001",
+            "ab1004",
+            "session",
+            "expired",
+            "invalid",
+        )
+        try:
+            res = api_func(*args, **kwargs)
+            if isinstance(res, dict) and not res.get("status"):
+                err_code = str(res.get("errorcode", "")).upper()
+                err_msg = str(res.get("message", "")).lower()
+                combined = f"{err_code} {err_msg}"
+                if any(k in combined for k in auth_keywords):
+                    if self.reauthenticate():
+                        return api_func(*args, **kwargs)
+            return res
+        except Exception as e:
+            err_str = str(e).lower()
+            if any(k in err_str for k in auth_keywords):
+                if self.reauthenticate():
+                    return api_func(*args, **kwargs)
+            raise
+
     def get_positions(self, force: bool = False) -> Dict[str, Any]:
         """Fetch open & day positions and normalize into {'net': [...], 'day': [...]}."""
         if not force:
@@ -288,7 +352,7 @@ class SmartApiClient:
             return {"net": [], "day": []}
 
         try:
-            res = self.smart_api.position()
+            res = self._execute_with_auth_retry(self.smart_api.position)
             if (
                 not res
                 or not res.get("status")
@@ -391,7 +455,7 @@ class SmartApiClient:
             return []
 
         try:
-            res = self.smart_api.orderBook()
+            res = self._execute_with_auth_retry(self.smart_api.orderBook)
             orders_raw = res.get("data", []) if (res and res.get("status")) else []
         except Exception as e:
             logger.error("Error fetching orderBook: %s", e)
@@ -642,7 +706,7 @@ class SmartApiClient:
         if trailing_stoploss:
             order_params["trailingstoploss"] = str(trailing_stoploss)
 
-        res = self.smart_api.placeOrder(order_params)
+        res = self._execute_with_auth_retry(self.smart_api.placeOrder, order_params)
         if not res:
             raise RuntimeError("No response received from placeOrder")
 
@@ -668,7 +732,7 @@ class SmartApiClient:
         if not self.smart_api:
             return {}
         var = "NORMAL" if variety in ("regular", "NORMAL") else variety
-        res = self.smart_api.cancelOrder(order_id, var)
+        res = self._execute_with_auth_retry(self.smart_api.cancelOrder, order_id, var)
         self.clear_cache()
         return res
 
@@ -724,7 +788,7 @@ class SmartApiClient:
         if trigger_price:
             params["triggerprice"] = str(trigger_price)
 
-        res = self.smart_api.modifyOrder(params)
+        res = self._execute_with_auth_retry(self.smart_api.modifyOrder, params)
         self.clear_cache()
         return res
 

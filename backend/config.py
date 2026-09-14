@@ -16,6 +16,8 @@ class ConfigManager:
         self.default_config = {
             "risk": {
                 "maxCapitalPerTrade": 4000,
+                "riskPerTrade": 500.0,  # 1R risk budget per trade in INR
+                "riskPercent": 1.0,  # 1.0% of portfolio equity risk per trade
                 "maxDailyLoss": 800,
                 "maxSimultaneousPositions": 4,
                 "maxDailyTrades": 8,
@@ -43,34 +45,33 @@ class ConfigManager:
                 "partialBookingTargetRR": 2.0,  # default Target 1 at 1:2 R:R
             },
             "strategies": {
-                # ── Top strategies for high-momentum F&O trading ──
+                # ── Top alpha strategies: breakout, structure, volume ──
                 "donchian_breakout": {"enabled": True},
                 "keltner_breakout": {"enabled": True},
                 "order_block_fvg": {"enabled": True},
                 "bollinger_breakout": {"enabled": True},
                 "institutional_absorption": {"enabled": True},
-                "psar_trend": {"enabled": True},
                 "volume_delta_divergence": {"enabled": True},
-                "tsi_cross": {"enabled": True},
-                "awesome_oscillator": {"enabled": True},
-                "ema_crossover": {"enabled": True},
                 "cmf_accumulation": {"enabled": True},
-                "macd_cross": {"enabled": True},
-                "stoc_rsi": {"enabled": True},
-                "stochastic_reversal": {"enabled": True},
-                "supertrend": {"enabled": True},
-                "mfi_exhaustion": {"enabled": True},
-                # ── Disabled — toxic counter-trend/fading oscillators with >56% SL rates ──
+                "cpr_breakout_reversal": {"enabled": True},
+                "opening_range_breakout": {"enabled": True},
+                "liquidity_grab_reversal": {"enabled": True},
+                "gap_fill": {"enabled": True},
+                # ── Pruned lagging indicators & negative expectancy oscillators ──
+                "psar_trend": {"enabled": False},  # -₹8,575 P&L in backtests
+                "ema_crossover": {"enabled": False},  # -₹2,201 P&L in backtests
+                "macd_cross": {"enabled": False},  # Flat/negative fee drag
+                "supertrend": {"enabled": False},  # Whipsaw prone on 15m
+                "tsi_cross": {"enabled": False},
+                "awesome_oscillator": {"enabled": False},
+                "stoc_rsi": {"enabled": False},
+                "stochastic_reversal": {"enabled": False},
+                "mfi_exhaustion": {"enabled": False},
                 "williams_r": {"enabled": False},  # 56.8% SL rate, -₹2,446 P&L
                 "cci_reversal": {"enabled": False},  # 63.3% SL rate, -₹1,813 P&L
                 "adx_momentum": {"enabled": False},  # 62.0% SL rate, -₹291 P&L
                 "rsi_reversal": {"enabled": False},  # 57.9% SL rate, -₹228 P&L
                 "vwap_bounce": {"enabled": False},  # 88.9% SL rate, -₹172 P&L
-                # ── High-win-rate intraday structural setups ──────────────────
-                "cpr_breakout_reversal": {"enabled": True},
-                "opening_range_breakout": {"enabled": True},
-                "liquidity_grab_reversal": {"enabled": True},
-                "gap_fill": {"enabled": True},
             },
             "watchlist": [
                 "RELIANCE",
@@ -306,6 +307,24 @@ class ConfigManager:
         path = self.config_dir / "historical_orders.json"
         with open(path, "w") as f:
             json.dump(orders, f, indent=4, default=str)
+
+    def get_active_trades(self) -> dict:
+        path = self.config_dir / "active_trades.json"
+        if path.exists():
+            try:
+                with open(path, "r") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def save_active_trades(self, trades: dict):
+        path = self.config_dir / "active_trades.json"
+        try:
+            with open(path, "w") as f:
+                json.dump(trades, f, indent=4, default=str)
+        except Exception:
+            pass
 
 
 config_manager = ConfigManager()

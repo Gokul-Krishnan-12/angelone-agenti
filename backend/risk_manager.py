@@ -73,11 +73,24 @@ class RiskManager:
         self.daily_trades_count = 0
 
     def calculate_position_size(self, price: float, stop_loss: float) -> int:
-        config = config_manager.get_risk_config()
-        max_capital = config["maxCapitalPerTrade"]
+        """Calculate 1R risk-based position size constrained by maximum capital ceiling and 5x MIS leverage."""
+        if price <= 0:
+            return 0
 
-        # Risk amount can also be used, but for now we just use max capital
-        quantity = int(max_capital / price)
+        config = config_manager.get_risk_config()
+        max_margin = float(config.get("maxCapitalPerTrade", 4000.0))
+        leverage = float(config.get("leverage", 5.0))
+        max_exposure = max_margin * leverage
+        risk_budget = float(config.get("riskPerTrade", 500.0))
+
+        per_share_risk = abs(price - stop_loss)
+        if per_share_risk > 0 and risk_budget > 0:
+            raw_quantity = int(risk_budget / per_share_risk)
+            max_allowed_qty = int(max_exposure / price)
+            quantity = min(raw_quantity, max_allowed_qty)
+        else:
+            quantity = int(max_exposure / price)
+
         return max(1, quantity)
 
     def check_daily_loss_limit(self) -> bool:

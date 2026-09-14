@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTradingStore } from '../stores/trading-store';
 import { SETTINGS_SAVE, TELEGRAM_TEST } from '@shared/ipc-channels';
-import { Shield, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle, Send } from 'lucide-react';
+import { Shield, ShieldCheck, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle, Send } from 'lucide-react';
 
 const Settings: React.FC = () => {
   const settings = useTradingStore((s) => s.settings);
@@ -98,6 +98,7 @@ const Settings: React.FC = () => {
       const cleanedRisk = { ...localSettings.risk };
       const numericKeys = [
         'maxCapitalPerTrade',
+        'riskPerTrade',
         'maxDailyLoss',
         'maxSimultaneousPositions',
         'maxDailyTrades',
@@ -132,6 +133,7 @@ const Settings: React.FC = () => {
       risk: {
         ...prev.risk,
         maxCapitalPerTrade: 4000,
+        riskPerTrade: 500,
         maxDailyLoss: 800,
         maxSimultaneousPositions: 4,
         maxDailyTrades: 8,
@@ -245,6 +247,27 @@ const Settings: React.FC = () => {
                   <Sparkles size={14} className="text-accent-light mt-0.5 shrink-0" />
                   <span>
                     <strong>5x Intraday Leverage:</strong> With Angel One MIS (20% margin), ₹{maxCap.toLocaleString('en-IN')} margin controls up to <strong className="text-white">₹{effectiveLeverageExposure}</strong> in position value.
+                  </span>
+                </div>
+              </div>
+
+              {/* 1R Risk Budget Per Trade */}
+              <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
+                <div className="flex justify-between items-center">
+                  <label className="block text-surface-300 text-xs font-semibold">1R Risk Budget Per Trade (₹)</label>
+                  <span className="text-[11px] font-mono text-accent-light">₹{Number(localSettings.risk?.riskPerTrade || 500).toLocaleString('en-IN')}</span>
+                </div>
+                <input 
+                  type="number" 
+                  value={localSettings.risk?.riskPerTrade ?? ''} 
+                  onChange={(e) => handleRiskChange('riskPerTrade', e.target.value)}
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
+                  placeholder="500"
+                />
+                <div className="p-2 rounded bg-surface-800/80 border border-surface-700/60 text-[11px] text-surface-400 flex items-start gap-1.5">
+                  <ShieldCheck size={14} className="text-profit-light mt-0.5 shrink-0" />
+                  <span>
+                    <strong>1R Constant Risk Sizing:</strong> Dynamically calculates shares as <code className="text-accent-light">floor(Risk / |Entry - SL|)</code> so every trade risks exactly 1R.
                   </span>
                 </div>
               </div>

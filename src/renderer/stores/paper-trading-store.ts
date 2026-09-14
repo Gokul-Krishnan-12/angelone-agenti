@@ -68,12 +68,14 @@ interface PaperTradingState {
   activityLog: PaperLogEntry[];
   maxCapitalPerTrade: number;
   maxDailyTrades: number;
+  riskPerTrade: number;
   lastPaperSummaryDate: string | null;
 
   setDummyBalance: (amount: number) => void;
   setIsRunning: (running: boolean) => void;
   setMaxCapitalPerTrade: (amount: number) => void;
   setMaxDailyTrades: (amount: number) => void;
+  setRiskPerTrade: (amount: number) => void;
   resetAccount: (newCapital?: number) => void;
   executePaperTradeFromSignal: (signal: Signal) => boolean;
   updateTickPrice: (tradingsymbol: string, price: number) => void;
@@ -126,6 +128,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       ],
       maxCapitalPerTrade: 4000,
       maxDailyTrades: 8,
+      riskPerTrade: 500,
 
       setDummyBalance: (amount: number) => {
         const valid = Math.max(1000, Number(amount) || 100000);
@@ -163,6 +166,10 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 
       setMaxDailyTrades: (amount: number) => {
         set({ maxDailyTrades: Math.max(1, Math.min(50, Number(amount) || 8)) });
+      },
+
+      setRiskPerTrade: (amount: number) => {
+        set({ riskPerTrade: Math.max(100, Number(amount) || 500) });
       },
 
       resetAccount: (newCapital?: number) => {
@@ -276,23 +283,6 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           return false;
         }
 
-        // Position sizing: With 5x intraday leverage (20% margin)
-        // Position value = margin * 5 -> quantity = (margin * 5) / price
-        const marginToUse = Math.min(state.maxCapitalPerTrade, state.dummyBalance);
-        if (marginToUse < 500) {
-          recordRejection(`Insufficient Balance: ₹${state.dummyBalance.toLocaleString('en-IN')} available (min ₹500 required)`);
-          return false;
-        }
-
-        const effectiveExposure = marginToUse * 5;
-        const quantity = Math.max(1, Math.floor(effectiveExposure / entryPrice));
-        const actualMarginUsed = (quantity * entryPrice) / 5;
-
-        if (actualMarginUsed > state.dummyBalance) {
-          recordRejection(`Required Margin (₹${Math.round(actualMarginUsed).toLocaleString('en-IN')}) exceeds available balance`);
-          return false;
-        }
-
         const posId = `paper-pos-${Date.now()}-${cleanSymbol}`;
         const orderId = `paper-ord-${Date.now()}-${cleanSymbol}`;
         const direction: 'BUY' | 'SELL' = signal.direction === 'SELL' ? 'SELL' : 'BUY';
@@ -309,6 +299,27 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           : direction === 'BUY'
             ? entryPrice * 0.985
             : entryPrice * 1.015;
+
+        // Position sizing: 1R risk-based sizing constrained by 5x MIS leverage & max capital ceiling
+        // Mirrors backend RiskManager.calculate_position_size
+        const marginToUse = Math.min(state.maxCapitalPerTrade, state.dummyBalance);
+        if (marginToUse < 500) {
+          recordRejection(`Insufficient Balance: ₹${state.dummyBalance.toLocaleString('en-IN')} available (min ₹500 required)`);
+          return false;
+        }
+
+        const effectiveExposure = marginToUse * 5;
+        const maxAllowedQty = Math.floor(effectiveExposure / entryPrice);
+        const riskBudget = state.riskPerTrade || 500;
+        const perShareRisk = Math.abs(entryPrice - stopLoss);
+        const rawQuantity = perShareRisk > 0 ? Math.floor(riskBudget / perShareRisk) : maxAllowedQty;
+        const quantity = Math.max(1, rawQuantity > 0 ? Math.min(rawQuantity, maxAllowedQty) : maxAllowedQty);
+        const actualMarginUsed = (quantity * entryPrice) / 5;
+
+        if (actualMarginUsed > state.dummyBalance) {
+          recordRejection(`Required Margin (₹${Math.round(actualMarginUsed).toLocaleString('en-IN')}) exceeds available balance`);
+          return false;
+        }
 
         // Calculate Target 1 (1:2 R:R) & Target 2 for partial profit booking on asymmetric setups
         const riskDist = Math.abs(entryPrice - stopLoss);
@@ -751,6 +762,8 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         rejectedTrades: state.rejectedTrades,
         activityLog: state.activityLog,
         maxCapitalPerTrade: state.maxCapitalPerTrade,
+        maxDailyTrades: state.maxDailyTrades,
+        riskPerTrade: state.riskPerTrade,
         lastPaperSummaryDate: state.lastPaperSummaryDate
       }),
       onRehydrateStorage: () => (state) => {

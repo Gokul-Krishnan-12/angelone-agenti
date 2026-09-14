@@ -20,7 +20,11 @@ class TradingEngine:
         self.thread = None
         self.mode = "confirm"  # auto or confirm
         self.interval = 60  # seconds
-        self.active_trades = {}  # tradingsymbol -> { sl, target, direction, entry_price, entry_time, original_strategy }
+        self.pending_orders = {}  # order_id -> pending order info awaiting fill
+        saved_trades = config_manager.get_active_trades()
+        self.active_trades = (
+            dict(saved_trades) if isinstance(saved_trades, dict) else {}
+        )
         self._instrument_map = {}  # cached symbol -> instrument_token map
         self._last_eod_summary_date = None
         self.dynamic_watchlist = []
@@ -85,7 +89,10 @@ class TradingEngine:
 
         while self.running:
             try:
-                # 1. Fast polling: Monitor live positions for Stop-Loss / Target
+                # 1. Check pending entry orders (promotes to active_trades on fill, cancels on timeout)
+                self.monitor_pending_orders()
+
+                # 2. Fast polling: Monitor live positions for Stop-Loss / Target
                 self.monitor_positions()
 
                 # 2. Check End of Day square off
@@ -296,30 +303,161 @@ class TradingEngine:
                 else:
                     target1 = round(entry_price - (risk_dist * target1_rr), 2)
 
-            self.active_trades[tradingsymbol] = {
-                "sl": stop_loss,
+            self.pending_orders[str(order_id)] = {
+                "order_id": str(order_id),
+                "tradingsymbol": tradingsymbol,
+                "exchange": exchange,
+                "direction": direction,
+                "quantity": qty,
+                "entry_price": entry_price,
+                "stop_loss": stop_loss,
                 "target": target,
                 "target1": target1,
                 "target2": target2,
-                "partial_booked": False,
-                "initial_quantity": qty,
-                "direction": direction,
-                "entry_price": entry_price,
-                "entry_time": datetime.datetime.now(),
                 "original_strategy": signal.get("strategy", "unknown"),
-                # ATR trailing SL support — seeded from signal indicators if present
                 "atr": signal.get("indicators", {}).get("atr", 0.0),
-                "high_water_mark": entry_price,  # for BUY
-                "low_water_mark": entry_price,  # for SELL
+                "submitted_at": time.time(),
             }
-            try:
-                ticker_manager.subscribe([tradingsymbol])
-            except Exception:
-                pass
             return True
         except Exception as e:
             self._push_log(f"Failed to execute signal: {e}")
             return False
+
+    def _place_exchange_stop_loss(
+        self,
+        symbol: str,
+        exchange: str,
+        direction: str,
+        quantity: int,
+        stop_loss: float,
+    ) -> str:
+        """Place native exchange Stop-Loss Limit order to protect position."""
+        tx_type = "SELL" if direction == "BUY" else "BUY"
+        if tx_type == "SELL":
+            limit_price = round(stop_loss * 0.99, 2)
+        else:
+            limit_price = round(stop_loss * 1.01, 2)
+
+        try:
+            sl_order_id = smart_api_client.place_order(
+                variety="STOPLOSS",
+                exchange=exchange,
+                tradingsymbol=symbol,
+                transaction_type=tx_type,
+                quantity=quantity,
+                product="INTRADAY",
+                order_type="STOPLOSS_LIMIT",
+                price=limit_price,
+                trigger_price=stop_loss,
+            )
+            self._push_log(
+                f"Placed Exchange SL order for {symbol} (trigger: ₹{stop_loss:.2f}, limit: ₹{limit_price:.2f}), SL Order ID: {sl_order_id}"
+            )
+            return str(sl_order_id)
+        except Exception as e:
+            self._push_log(
+                f"Warning: Failed to place native exchange SL for {symbol}: {e}. Local fallback will monitor.",
+                level="warning",
+            )
+            return ""
+
+    def monitor_pending_orders(self):
+        """Monitor pending entry orders. Promote to active_trades on fill, cancel on timeout."""
+        if not self.pending_orders:
+            return
+
+        try:
+            orders = smart_api_client.get_orders(force=True)
+            order_map = {str(o.get("orderId")): o for o in orders if o.get("orderId")}
+            now = time.time()
+            to_remove = []
+
+            for order_id, pending in list(self.pending_orders.items()):
+                order_info = order_map.get(order_id)
+                status = (order_info.get("status") if order_info else "").upper()
+                symbol = pending["tradingsymbol"]
+
+                if status in ("COMPLETE", "COMPLETED"):
+                    fill_price = float(
+                        order_info.get("averagePrice") or pending["entry_price"]
+                    )
+                    fill_qty = int(
+                        order_info.get("filledQuantity") or pending["quantity"]
+                    )
+                    direction = pending["direction"]
+                    sl = pending["stop_loss"]
+                    target = pending["target"]
+
+                    self._push_log(
+                        f"Entry order {order_id} FILLED for {symbol}: {fill_qty} shares @ ₹{fill_price:.2f}"
+                    )
+
+                    # Place native exchange-side Stop Loss
+                    sl_order_id = self._place_exchange_stop_loss(
+                        symbol=symbol,
+                        exchange=pending["exchange"],
+                        direction=direction,
+                        quantity=fill_qty,
+                        stop_loss=sl,
+                    )
+
+                    self.active_trades[symbol] = {
+                        "sl": sl,
+                        "sl_order_id": sl_order_id,
+                        "target": target,
+                        "target1": pending.get("target1", target),
+                        "target2": pending.get("target2", target),
+                        "partial_booked": False,
+                        "initial_quantity": fill_qty,
+                        "direction": direction,
+                        "entry_price": fill_price,
+                        "entry_time": datetime.datetime.now().isoformat(),
+                        "original_strategy": pending["original_strategy"],
+                        "atr": pending["atr"],
+                        "high_water_mark": fill_price,
+                        "low_water_mark": fill_price,
+                    }
+                    config_manager.save_active_trades(self.active_trades)
+                    try:
+                        ticker_manager.subscribe([symbol])
+                    except Exception:
+                        pass
+                    to_remove.append(order_id)
+
+                elif status in ("CANCELLED", "REJECTED"):
+                    reason = (
+                        order_info.get("statusMessage", "Cancelled/Rejected")
+                        if order_info
+                        else "Cancelled"
+                    )
+                    self._push_log(
+                        f"Entry order {order_id} for {symbol} was {status}: {reason}",
+                        level="warning",
+                    )
+                    to_remove.append(order_id)
+
+                elif (now - pending.get("submitted_at", now)) > 60:
+                    # Timeout after 60 seconds of sitting unfilled in order book
+                    self._push_log(
+                        f"Entry order {order_id} for {symbol} timed out (60s unfilled). Cancelling.",
+                        level="warning",
+                    )
+                    try:
+                        smart_api_client.cancel_order(
+                            variety="NORMAL", order_id=order_id
+                        )
+                    except Exception as e:
+                        self._push_log(
+                            f"Error cancelling timed-out order {order_id}: {e}",
+                            level="warning",
+                        )
+                    to_remove.append(order_id)
+
+            for o_id in to_remove:
+                self.pending_orders.pop(o_id, None)
+
+        except Exception as e:
+            self._push_log(f"Error in monitor_pending_orders: {e}", level="warning")
 
     def _get_exit_limit_price(self, ltp: float, tx_type: str) -> float:
         # A pseudo-market limit order to ensure immediate fill without Kite MARKET restrictions
@@ -349,17 +487,28 @@ class TradingEngine:
                 except Exception:
                     pass
 
-            # Clean up active_trades if position was closed manually via Angel One App
+            # Clean up active_trades if position was closed manually via Angel One App or SL filled
             symbols_to_remove = []
             for symbol in self.active_trades.keys():
                 clean_sym = symbol.replace("-EQ", "")
                 if symbol not in open_symbols and clean_sym not in open_symbols:
                     symbols_to_remove.append(symbol)
             for symbol in symbols_to_remove:
+                trade = self.active_trades.get(symbol, {})
+                sl_id = trade.get("sl_order_id")
+                if sl_id:
+                    try:
+                        smart_api_client.cancel_order(
+                            variety="STOPLOSS", order_id=sl_id
+                        )
+                    except Exception:
+                        pass
                 self._push_log(
-                    f"Detected manual closure for {symbol}. Removing from tracking."
+                    f"Detected closure for {symbol}. Removing from tracking."
                 )
                 del self.active_trades[symbol]
+            if symbols_to_remove:
+                config_manager.save_active_trades(self.active_trades)
 
             # Evaluate SL and Targets
             for p in positions:
@@ -388,12 +537,22 @@ class TradingEngine:
 
                             self.active_trades[active_key] = {
                                 "sl": sl,
+                                "sl_order_id": "",
                                 "target": target,
                                 "direction": direction,
                                 "entry_price": avg_price,
-                                "entry_time": datetime.datetime.now(),
+                                "entry_time": datetime.datetime.now().isoformat(),
                                 "original_strategy": "adopted",
                             }
+                            sl_id = self._place_exchange_stop_loss(
+                                symbol=symbol,
+                                exchange=p["exchange"],
+                                direction=direction,
+                                quantity=abs(p["quantity"]),
+                                stop_loss=sl,
+                            )
+                            self.active_trades[active_key]["sl_order_id"] = sl_id
+                            config_manager.save_active_trades(self.active_trades)
                             self._push_log(
                                 f"Adopted open position {symbol} ({direction}) at ₹{avg_price}. Auto-calculated SL: ₹{sl}, Target: ₹{target}"
                             )
@@ -462,7 +621,18 @@ class TradingEngine:
                                         price=self._get_exit_limit_price(ltp, tx_type),
                                     )
 
+                                    # Cancel old SL order on full quantity
+                                    old_sl_id = trade.get("sl_order_id")
+                                    if old_sl_id:
+                                        try:
+                                            smart_api_client.cancel_order(
+                                                variety="STOPLOSS", order_id=old_sl_id
+                                            )
+                                        except Exception:
+                                            pass
+
                                     # Move SL to Breakeven on remaining runner shares
+                                    remaining_qty = current_qty - exit_qty
                                     old_sl = trade["sl"]
                                     trade["sl"] = trade["entry_price"]
                                     trade["partial_booked"] = True
@@ -470,10 +640,25 @@ class TradingEngine:
                                         "target2", trade["target"]
                                     )
 
+                                    # Place new exchange SL at breakeven for remaining shares
+                                    if remaining_qty > 0:
+                                        trade["sl_order_id"] = (
+                                            self._place_exchange_stop_loss(
+                                                symbol=symbol,
+                                                exchange=p["exchange"],
+                                                direction=trade["direction"],
+                                                quantity=remaining_qty,
+                                                stop_loss=trade["entry_price"],
+                                            )
+                                        )
+                                    config_manager.save_active_trades(
+                                        self.active_trades
+                                    )
+
                                     self._push_log(
                                         f"🎯 PARTIAL TARGET 1 HIT for {symbol}: Booked {exit_qty} shares at ₹{ltp:.2f} "
                                         f"(+₹{expected_gain:.2f}). Moved SL from ₹{old_sl:.2f} to Breakeven @ ₹{trade['entry_price']:.2f}. "
-                                        f"{current_qty - exit_qty} runner shares targeting ₹{trade['target']:.2f}."
+                                        f"{remaining_qty} runner shares targeting ₹{trade['target']:.2f}."
                                     )
 
                                     try:
@@ -516,6 +701,18 @@ class TradingEngine:
                                 hit_target = True
 
                         if hit_sl or hit_target:
+                            # Cancel resting exchange SL order if target was hit or before sending manual exit
+                            sl_id = trade.get("sl_order_id")
+                            if sl_id:
+                                try:
+                                    smart_api_client.cancel_order(
+                                        variety="STOPLOSS", order_id=sl_id
+                                    )
+                                except Exception:
+                                    pass
+                            trade["sl_order_id"] = ""
+                            config_manager.save_active_trades(self.active_trades)
+
                             reason = (
                                 "Breakeven Stop Loss"
                                 if (hit_sl and trade.get("partial_booked", False))
@@ -606,10 +803,41 @@ class TradingEngine:
                                 if new_sl is not None:
                                     old_sl = trade["sl"]
                                     trade["sl"] = new_sl
+                                    # Modify exchange-side SL order trigger and limit price
+                                    sl_id = trade.get("sl_order_id")
+                                    if sl_id:
+                                        tx_type = (
+                                            "SELL"
+                                            if trade["direction"] == "BUY"
+                                            else "BUY"
+                                        )
+                                        lim_p = (
+                                            round(new_sl * 0.99, 2)
+                                            if tx_type == "SELL"
+                                            else round(new_sl * 1.01, 2)
+                                        )
+                                        try:
+                                            smart_api_client.modify_order(
+                                                variety="STOPLOSS",
+                                                order_id=sl_id,
+                                                tradingsymbol=symbol,
+                                                order_type="STOPLOSS_LIMIT",
+                                                price=lim_p,
+                                                trigger_price=new_sl,
+                                            )
+                                        except Exception as e:
+                                            self._push_log(
+                                                f"Error modifying exchange SL {sl_id}: {e}",
+                                                level="warning",
+                                            )
+
                                     self._push_log(
                                         f"Trailing SL ratcheted for {symbol}: "
                                         f"₹{old_sl:.2f} → ₹{new_sl:.2f} "
                                         f"(ATR {atr:.2f} × {tsl_mult})"
+                                    )
+                                    config_manager.save_active_trades(
+                                        self.active_trades
                                     )
         except Exception as e:
             self._push_log(f"Error monitoring positions: {e}")
@@ -716,13 +944,49 @@ class TradingEngine:
     def _tighten_to_breakeven(self, symbol: str):
         """Move the stop-loss to the entry price (breakeven)."""
         if symbol in self.active_trades:
-            entry_price = self.active_trades[symbol].get("entry_price", 0)
+            trade = self.active_trades[symbol]
+            entry_price = trade.get("entry_price", 0)
             if entry_price > 0:
-                self.active_trades[symbol]["sl"] = entry_price
+                trade["sl"] = entry_price
+                sl_id = trade.get("sl_order_id")
+                if sl_id:
+                    tx_type = "SELL" if trade["direction"] == "BUY" else "BUY"
+                    lim_p = (
+                        round(entry_price * 0.99, 2)
+                        if tx_type == "SELL"
+                        else round(entry_price * 1.01, 2)
+                    )
+                    try:
+                        smart_api_client.modify_order(
+                            variety="STOPLOSS",
+                            order_id=sl_id,
+                            tradingsymbol=symbol,
+                            order_type="STOPLOSS_LIMIT",
+                            price=lim_p,
+                            trigger_price=entry_price,
+                        )
+                    except Exception as e:
+                        self._push_log(
+                            f"Error modifying exchange SL order {sl_id} to breakeven: {e}",
+                            level="warning",
+                        )
+                config_manager.save_active_trades(self.active_trades)
 
     def _exit_position(self, position: dict, symbol: str, reason: str):
         """Exit a position due to thesis invalidation."""
         try:
+            if symbol in self.active_trades:
+                sl_id = self.active_trades[symbol].get("sl_order_id")
+                if sl_id:
+                    try:
+                        smart_api_client.cancel_order(
+                            variety="STOPLOSS", order_id=sl_id
+                        )
+                    except Exception:
+                        pass
+                self.active_trades[symbol]["sl_order_id"] = ""
+                config_manager.save_active_trades(self.active_trades)
+
             ltp = position.get("lastPrice", 0)
             if ltp == 0:
                 self._push_log(f"Cannot exit {symbol}: no LTP available")
@@ -750,6 +1014,19 @@ class TradingEngine:
             positions = smart_api_client.get_positions().get("net", [])
             for p in positions:
                 if p["quantity"] != 0:
+                    sym = p["tradingsymbol"]
+                    clean = sym.replace("-EQ", "")
+                    for k in (sym, clean):
+                        if k in self.active_trades:
+                            sl_id = self.active_trades[k].get("sl_order_id")
+                            if sl_id:
+                                try:
+                                    smart_api_client.cancel_order(
+                                        variety="STOPLOSS", order_id=sl_id
+                                    )
+                                except Exception:
+                                    pass
+
                     tx_type = "SELL" if p["quantity"] > 0 else "BUY"
                     ltp = p.get("lastPrice", 0)
 
@@ -765,11 +1042,11 @@ class TradingEngine:
                         if ltp > 0
                         else 0,
                     )
-                    clean = p["tradingsymbol"].replace("-EQ", "")
                     if p["tradingsymbol"] in self.active_trades:
                         del self.active_trades[p["tradingsymbol"]]
                     if clean in self.active_trades:
                         del self.active_trades[clean]
+            config_manager.save_active_trades(self.active_trades)
         except Exception as e:
             self._push_log(f"Error in square off: {e}")
 

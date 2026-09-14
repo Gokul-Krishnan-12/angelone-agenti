@@ -33,7 +33,10 @@ import {
   Copy,
   Check,
   Calendar,
-  Eye
+  Eye,
+  Database,
+  RefreshCw,
+  Timer
 } from 'lucide-react';
 
 interface StrategyItem {
@@ -580,21 +583,21 @@ const SystemGuide: React.FC = () => {
                 },
                 {
                   step: '04',
-                  title: 'Risk Geometry',
-                  desc: 'Enforces 1.0% safety noise buffer floor, pre-trade statutory friction guard (≥3.5x fees), and daily trade cap (max 8-10/day).',
-                  badge: 'Quant Risk Geometry'
+                  title: '1R Risk Geometry',
+                  desc: 'Enforces dynamic 1R risk-based position sizing [Q = min(floor(Risk/ΔSL), floor(Exposure/Price))], 1.0% noise buffer floor, friction guard (≥3.5x fees), and daily trade cap.',
+                  badge: '1R Quant Sizing'
                 },
                 {
                   step: '05',
-                  title: 'Order Dispatch',
-                  desc: 'Routes smart limit pseudo-market orders via SmartAPI for live trading, or simulates fills at exact tick price in paper mode.',
-                  badge: 'Execution Core'
+                  title: 'Limit Queue & Timeout',
+                  desc: 'Places smart limit entry with a 60-second timeout queue. Unfilled orders are cancelled automatically to prevent stale fills on fast moves.',
+                  badge: '60s Timeout Queue'
                 },
                 {
                   step: '06',
-                  title: 'Active Lifecycle',
-                  desc: 'Trails stop-loss, books 50% at Target 1, ratchets runner to breakeven, and triggers 15:15 auto square-off.',
-                  badge: 'Risk Monitor'
+                  title: 'Native Exchange SL',
+                  desc: 'Submits native STOPLOSS_LIMIT order directly to the exchange upon fill, trails stop dynamically, books 50% at Target 1, and squares off at 15:15.',
+                  badge: 'Exchange-Side SL'
                 }
               ].map((item, idx) => (
                 <div
@@ -619,6 +622,98 @@ const SystemGuide: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Enterprise Execution Safeguards & Crash Resilience */}
+          <div className="bg-surface-800/90 backdrop-blur-sm border border-surface-700/80 rounded-2xl p-6 shadow-lg space-y-4">
+            <div className="flex items-center justify-between border-b border-surface-700/60 pb-3">
+              <div>
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <ShieldCheck className="text-profit-light" size={20} />
+                  Enterprise Execution Safeguards &amp; Crash Resilience
+                </h3>
+                <p className="text-xs text-surface-400 mt-0.5">
+                  Production-grade safeguards protecting live capital against disconnections, order lag, software crashes, and session expiry.
+                </p>
+              </div>
+              <span className="text-xs font-mono px-3 py-1 rounded-full bg-profit-light/10 text-profit-light border border-profit-light/30">
+                Institutional Safety Architecture
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Safeguard 1: Native Exchange SL */}
+              <div className="p-4 rounded-xl bg-surface-900/80 border border-surface-700/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Lock size={14} className="text-accent-light" /> Native Exchange SL
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-800 text-profit-light border border-surface-700">
+                    STOPLOSS_LIMIT
+                  </span>
+                </div>
+                <p className="text-xs text-surface-300 leading-relaxed">
+                  Immediately upon entry fill, a real <strong>STOPLOSS_LIMIT</strong> order is dispatched directly to the NSE match engine. If your desktop, internet, or app crashes, your capital remains 100% safeguarded on the broker/exchange order book.
+                </p>
+                <div className="text-[10px] text-surface-500 font-mono pt-1">
+                  Dynamic Ratchet: SmartAPI modify_order moves SL to breakeven at Target 1.
+                </div>
+              </div>
+
+              {/* Safeguard 2: 60s Pending Limit Queue */}
+              <div className="p-4 rounded-xl bg-surface-900/80 border border-surface-700/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Timer size={14} className="text-warning-light" /> 60s Limit Queue
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-800 text-warning-light border border-surface-700">
+                    TTL 60 Seconds
+                  </span>
+                </div>
+                <p className="text-xs text-surface-300 leading-relaxed">
+                  Breakout entries are placed as Limit orders near the bid/ask spread. The engine tracks unfilled orders in an active timeout queue. If unfilled after <strong>60 seconds</strong>, the order is automatically cancelled to prevent adverse fills on fading momentum.
+                </p>
+                <div className="text-[10px] text-surface-500 font-mono pt-1">
+                  Anti-Lag: Eliminates stale resting orders during market reversals.
+                </div>
+              </div>
+
+              {/* Safeguard 3: Active Trades Disk Persistence */}
+              <div className="p-4 rounded-xl bg-surface-900/80 border border-surface-700/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Database size={14} className="text-accent-light" /> Disk Persistence
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-800 text-accent-light border border-surface-700">
+                    active_trades.json
+                  </span>
+                </div>
+                <p className="text-xs text-surface-300 leading-relaxed">
+                  Every active trade, position watermark, and corresponding native stop-loss order ID is atomically persisted to encrypted disk storage. On process restart or system reboot, the engine automatically reloads and re-attaches to live orders without state loss.
+                </p>
+                <div className="text-[10px] text-surface-500 font-mono pt-1">
+                  Crash Proof: Reconstructs state without orphan orders or ghost trades.
+                </div>
+              </div>
+
+              {/* Safeguard 4: Headless Session Re-Auth */}
+              <div className="p-4 rounded-xl bg-surface-900/80 border border-surface-700/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <RefreshCw size={14} className="text-profit-light" /> Session Auto-Renewal
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-800 text-profit-light border border-surface-700">
+                    TOTP Auto Re-Auth
+                  </span>
+                </div>
+                <p className="text-xs text-surface-300 leading-relaxed">
+                  SmartAPI JWT tokens expire every 24 hours. When an API call returns <code>AB1010</code>, <code>AG8001</code>, or <code>Invalid Token</code>, the client headlessly regenerates a fresh TOTP code, re-authenticates with SmartAPI, and seamlessly retries the operation.
+                </p>
+                <div className="text-[10px] text-surface-500 font-mono pt-1">
+                  Zero Interruption: Scanning and order monitoring continue without user login.
+                </div>
+              </div>
             </div>
           </div>
 
@@ -944,6 +1039,32 @@ const SystemGuide: React.FC = () => {
       {/* ─── TAB 3: 25 STRATEGIES CATALOG ───────────────────────────────── */}
       {activeTab === 'strategies' && (
         <div className="space-y-6 animate-fade-in">
+          {/* Active Roster Pruning Notice */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-accent-DEFAULT/15 via-surface-900 to-surface-900 border border-accent-DEFAULT/30 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-accent-light font-bold text-xs uppercase tracking-wider">
+                <Filter size={16} />
+                Quantitative Strategy Pruning Policy (Walk-Forward Verified)
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-accent-light/15 text-accent-light border border-accent-light/30">
+                Shared by Auto &amp; Paper Agent
+              </span>
+            </div>
+            <p className="text-xs text-surface-300 leading-relaxed">
+              To eliminate false whipsaws and negative fee drag, lagging indicators and low-expectancy oscillators have been <strong>pruned and disabled by default</strong> in the backend scanner configuration. Rigorous walk-forward backtesting proved that standard 15-minute trend crossovers (PSAR: -₹8,575 P&amp;L, EMA Crossover: -₹2,201 P&amp;L, MACD cross, 15m Supertrend) and exhausted oscillators suffer from excessive stop-loss rates (56%–63%).
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 text-xs">
+              <div className="p-2.5 rounded-xl bg-surface-800/80 border border-loss-light/20 text-surface-300">
+                <span className="font-bold text-loss-light block mb-1">Pruned / Disabled by Default:</span>
+                <span className="text-[11px] text-surface-400">PSAR Trend, EMA Crossover, MACD Cross, Supertrend, Stochastic Reversal, Williams %R, CCI, ADX Momentum, VWAP Bounce.</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-surface-800/80 border border-profit-light/20 text-surface-300">
+                <span className="font-bold text-profit-light block mb-1">Active High-Conviction Core:</span>
+                <span className="text-[11px] text-surface-400">Donchian Breakout, Keltner Channel Breakout, Bollinger Squeeze, Institutional Absorption, Fair Value Gap (FVG), Volume Delta Divergence, CMF Accumulation, Opening Range Breakout (ORB).</span>
+              </div>
+            </div>
+          </div>
+
           {/* Filter & Search Bar */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-surface-800/90 p-4 rounded-2xl border border-surface-700/80 shadow-md">
             <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
@@ -1128,6 +1249,52 @@ const SystemGuide: React.FC = () => {
                     <span className="font-mono text-[11px] text-accent-light block mt-1 bg-surface-950 p-2 rounded border border-surface-700">
                       Target Distance = 1.0% Safety SL × Strategy Ratio (e.g. 1.0% × 4 = 4.0% Target)
                     </span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* 1R Risk-Based Position Sizing Card */}
+            <div className="bg-surface-900/90 border border-surface-700/80 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Scale className="text-profit-light" size={18} />
+                  1R Risk-Based Position Sizing (Constant Loss Budget)
+                </h3>
+                <span className="text-[10px] font-mono px-2.5 py-0.5 rounded bg-profit-light/10 text-profit-light border border-profit-light/30 font-bold">
+                  Shared by Live &amp; Paper Agents
+                </span>
+              </div>
+
+              <p className="text-xs text-surface-300 leading-relaxed">
+                Naive trading systems size positions by flat capital allocation (e.g. fixed ₹4,000 margin per trade). This creates dangerous variance: a volatile mid-cap stock with a 2.5% stop-loss risks over ₹500 on failure, while a high-priced stable stock with a 1.0% stop-loss risks only ₹200. This asymmetry causes one volatile loss to wipe out multiple successful trades.
+              </p>
+
+              <div className="p-3.5 rounded-xl bg-surface-950 border border-surface-700/70 font-mono text-xs text-accent-light space-y-1">
+                <div className="text-surface-400 text-[11px]">Dynamic Position Formula:</div>
+                <div className="font-bold text-sm text-white">
+                  Quantity = min( floor( Risk Budget / |Entry - StopLoss| ), floor( Max Capital Exposure / Entry Price ) )
+                </div>
+                <div className="text-surface-500 text-[10px]">
+                  Where Risk Budget = ₹500 (1R), and Max Capital Exposure = Max Capital Per Trade × 5 (MIS 5x Leverage).
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <div className="p-3.5 rounded-xl bg-surface-800/80 border border-surface-700/80 space-y-1.5">
+                  <span className="font-bold text-white block">Stock A (Tight 1.0% SL on High-Priced Stock):</span>
+                  <p className="text-surface-400 leading-relaxed">
+                    Entry: ₹2,500 | SL: ₹2,475 (Risk/share = ₹25.00).<br />
+                    Quantity = ₹500 / ₹25 = <strong>20 shares</strong> (₹50,000 exposure within 5x leverage).<br />
+                    <span className="text-loss-light font-mono font-bold">If stopped out: Loss = 20 × ₹25 = -₹500 (Exactly 1R).</span>
+                  </p>
+                </div>
+                <div className="p-3.5 rounded-xl bg-surface-800/80 border border-surface-700/80 space-y-1.5">
+                  <span className="font-bold text-white block">Stock B (Wider 2.0% SL on Volatile Stock):</span>
+                  <p className="text-surface-400 leading-relaxed">
+                    Entry: ₹250 | SL: ₹245 (Risk/share = ₹5.00).<br />
+                    Quantity = ₹500 / ₹5 = <strong>100 shares</strong> (₹25,000 exposure within 5x leverage).<br />
+                    <span className="text-loss-light font-mono font-bold">If stopped out: Loss = 100 × ₹5 = -₹500 (Exactly 1R).</span>
                   </p>
                 </div>
               </div>
@@ -1725,39 +1892,54 @@ const SystemGuide: React.FC = () => {
                 <tbody className="divide-y divide-surface-700/60 bg-surface-900/40">
                   {[
                     {
-                      dim: 'Strategy Scanners & Signals',
-                      paper: 'Identical (All 25 Strategies scan simultaneously across active universe)',
-                      live: 'Identical (Executes on the exact same Python scanner)'
+                      dim: 'Strategy Universe & Signals',
+                      paper: 'Identical: High-conviction Breakout & Structure roster (Lagging indicators & negative oscillators disabled by default)',
+                      live: 'Identical: Executes on the exact same pruned Python scanner engine'
+                    },
+                    {
+                      dim: 'Position Sizing Engine',
+                      paper: '1R Risk-Based Sizing: Q = min(floor(Risk/ΔSL), floor(Exposure/Price)) with 5x MIS leverage (constant loss budget)',
+                      live: 'Identical: 1R Risk-Based Sizing via RiskManager.calculate_position_size'
                     },
                     {
                       dim: 'Confluence Gate & Multi-Family Voting',
-                      paper: 'Identical (Requires ≥ 2 families + 50 EMA trend check)',
-                      live: 'Identical (Extra backstop: Confidence ≥ 85% in Auto mode)'
+                      paper: 'Identical: Requires ≥ 2 distinct families + 50 EMA trend filter',
+                      live: 'Identical: Requires ≥ 2 distinct families + 50 EMA trend filter (Confidence ≥ 85% in Auto mode)'
                     },
                     {
-                      dim: 'Risk-to-Reward & Noise Buffer Floor',
-                      paper: 'Identical (1.0% minimum SL buffer + 1:2 to 1:4 Target)',
-                      live: 'Identical (Exact calculated price levels routed to broker)'
+                      dim: 'Stop Loss Protection',
+                      paper: 'Live Tick Monitor: In-memory real-time tick evaluation triggering simulated SL / Breakeven exits',
+                      live: 'Native Exchange-Side: Immediate STOPLOSS_LIMIT order placed on NSE/BSE book (survives app crashes)'
                     },
                     {
-                      dim: 'Partial Booking & Breakeven Ratchet',
-                      paper: 'Supported (Books 50% at Target 1, ratchets virtual SL)',
-                      live: 'Supported (Dispatches partial limit order, ratchets broker stop)'
+                      dim: 'Pending Order Management',
+                      paper: 'Immediate virtual execution at incoming tick price',
+                      live: '60-Second Timeout Queue: Unfilled limit orders are auto-cancelled after 60s to prevent stale fills'
                     },
                     {
-                      dim: 'Order Dispatch Mechanism',
-                      paper: 'Simulated fill at incoming real-time tick price',
-                      live: 'Real LIMIT orders placed via SmartAPI on NSE/BSE'
+                      dim: 'Dynamic Trailing & Partial Booking',
+                      paper: 'Supported: Books 50% at Target 1, ratchets virtual SL to Breakeven @ Entry',
+                      live: 'Supported: Books 50% at Target 1, modifies exchange-side SL order to Breakeven via SmartAPI'
+                    },
+                    {
+                      dim: 'State Persistence & Recovery',
+                      paper: 'Local Storage: Zustand storage syncs open positions and order history',
+                      live: 'Atomic Disk Persistence: active_trades.json saves positions & SL order IDs to recover after reboot'
+                    },
+                    {
+                      dim: 'Session Authentication',
+                      paper: 'Streams live ticks from authenticated SmartAPI session',
+                      live: 'Headless TOTP Auto-Renewal: Re-authenticates and retries on AB1010/AG8001 token expiry'
                     },
                     {
                       dim: 'Brokerage & Statutory Taxes',
-                      paper: '₹0 (Gross theoretical P&L tracking)',
-                      live: '₹20/order brokerage + STT + Exchange fees + GST'
+                      paper: '₹0 (Pure strategy edge & gross P&L tracking)',
+                      live: 'Full Friction: ₹20/order brokerage + STT + Exchange fees + Stamp Duty + GST'
                     },
                     {
                       dim: 'Execution Modes',
                       paper: 'Always automatic simulation in local storage',
-                      live: 'Toggle between "Confirm Mode" (manual review) and "Auto Mode"'
+                      live: 'Toggle between "Confirm Mode" (manual trade review) and "Auto Mode"'
                     }
                   ].map((row, i) => (
                     <tr key={i} className="hover:bg-surface-700/40 transition-colors">

@@ -248,6 +248,7 @@ export interface AgentState {
 
 export interface RiskConfig {
   maxCapitalPerTrade: number;
+  riskPerTrade?: number;
   maxDailyLoss: number;
   maxOpenPositions: number;
   maxSimultaneousPositions?: number;

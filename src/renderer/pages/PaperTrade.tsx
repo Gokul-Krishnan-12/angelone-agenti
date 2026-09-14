@@ -32,8 +32,10 @@ const PaperTrade: React.FC = () => {
   const activityLog = usePaperTradingStore((s) => s.activityLog);
   const maxCapitalPerTrade = usePaperTradingStore((s) => s.maxCapitalPerTrade);
   const maxDailyTrades = usePaperTradingStore((s) => s.maxDailyTrades) || 8;
+  const riskPerTrade = usePaperTradingStore((s) => s.riskPerTrade) || 500;
   const rejectedTrades = usePaperTradingStore((s) => s.rejectedTrades) || [];
   const setMaxDailyTrades = usePaperTradingStore((s) => s.setMaxDailyTrades);
+  const setRiskPerTrade = usePaperTradingStore((s) => s.setRiskPerTrade);
   const setIsRunning = usePaperTradingStore((s) => s.setIsRunning);
   const setDummyBalance = usePaperTradingStore((s) => s.setDummyBalance);
   const setMaxCapitalPerTrade = usePaperTradingStore((s) => s.setMaxCapitalPerTrade);
@@ -54,6 +56,7 @@ const PaperTrade: React.FC = () => {
 
   const [customBalanceInput, setCustomBalanceInput] = useState<string>('');
   const [customMaxTradesInput, setCustomMaxTradesInput] = useState<string>('');
+  const [customRiskInput, setCustomRiskInput] = useState<string>('');
   const [showBalanceModal, setShowBalanceModal] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'rejected' | 'logs'>('positions');
 
@@ -91,6 +94,11 @@ const PaperTrade: React.FC = () => {
     if (!isNaN(tradesVal) && tradesVal > 0) {
       setMaxDailyTrades(tradesVal);
       setCustomMaxTradesInput('');
+    }
+    const riskVal = parseFloat(customRiskInput);
+    if (!isNaN(riskVal) && riskVal >= 100) {
+      setRiskPerTrade(riskVal);
+      setCustomRiskInput('');
     }
     setShowBalanceModal(false);
   };
@@ -734,6 +742,25 @@ const PaperTrade: React.FC = () => {
                 />
                 <p className="text-[10px] text-surface-500">
                   Caps total executed trades per day (8–10 recommended) to eliminate overtrading and preserve capital.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs text-surface-300 font-medium">1R Risk Budget Per Trade (₹)</label>
+                  <span className="text-[10px] font-mono text-accent-light">Current: ₹{riskPerTrade.toLocaleString('en-IN')}</span>
+                </div>
+                <input
+                  type="number"
+                  min="100"
+                  step="50"
+                  placeholder={`e.g. 500 (Current: ₹${riskPerTrade})`}
+                  value={customRiskInput}
+                  onChange={(e) => setCustomRiskInput(e.target.value)}
+                  className="w-full bg-surface-950 border border-surface-700 rounded-xl px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-accent-light"
+                />
+                <p className="text-[10px] text-surface-500">
+                  Defines the constant 1R loss budget. Position quantity is sized so losses on SL hits equal exactly this amount.
                 </p>
               </div>
 
