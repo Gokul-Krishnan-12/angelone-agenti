@@ -48,7 +48,7 @@ NIFTY_50_SUBSET = [
 SHORT_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
 
-DEFAULT_BLACKLIST = ["SUZLON", "TIINDIA", "ICICIGI"]
+DEFAULT_BLACKLIST: List[str] = []
 
 
 def screen_top_momentum_fno(
@@ -58,22 +58,22 @@ def screen_top_momentum_fno(
     max_price: float = 100_000.0,
     min_daily_volume: int = 0,
     blacklist: Optional[List[str]] = None,
+    min_ker: float = 0.28,
 ) -> list[str]:
     """Rank F&O stocks by realized intraday range, directional velocity, and net trend.
 
-    Excludes toxic drag stocks (blacklist) and low-liquidity symbols.
+    Excludes low-efficiency regime stocks via Kaufman Efficiency Ratio (KER >= 0.28).
     """
     import pandas as pd
     import yfinance as yf
 
     from ..fno_universe import get_fno_universe
+    from ..screener import calculate_kaufman_efficiency_ratio
 
     active_blacklist = set(blacklist if blacklist is not None else DEFAULT_BLACKLIST)
 
     fno = [s for s in get_fno_universe() if s not in active_blacklist]
-    print(
-        f"\n[Screener] Screening {len(fno)} F&O stocks (blacklisted: {', '.join(active_blacklist)})..."
-    )
+    print(f"\n[Screener] Screening {len(fno)} F&O stocks (KER gate: >= {min_ker})...")
     tickers = [f"{s}.NS" for s in fno]
 
     daily_period = period if period in ("30d", "60d", "90d") else "60d"
@@ -112,6 +112,12 @@ def screen_top_momentum_fno(
             if max_price < 100_000.0 and mean_p > max_price:
                 continue
             if min_daily_volume > 0 and avg_vol < min_daily_volume:
+                continue
+
+            ker = calculate_kaufman_efficiency_ratio(
+                sub["close"], period=min(20, len(sub) - 1)
+            )
+            if min_ker > 0.0 and ker < min_ker:
                 continue
 
             range_pct = float(((sub["high"] - sub["low"]) / sub["close"] * 100).mean())
@@ -248,10 +254,16 @@ def main():
         help="Quality filter: minimum average daily volume (default: 0)",
     )
     parser.add_argument(
+        "--min-ker",
+        type=float,
+        default=0.28,
+        help="Minimum Kaufman Efficiency Ratio gate (default: 0.28)",
+    )
+    parser.add_argument(
         "--blacklist",
-        nargs="+",
-        default=DEFAULT_BLACKLIST,
-        help="Symbols to exclude from trading (default: SUZLON TIINDIA ICICIGI)",
+        nargs="*",
+        default=[],
+        help="Symbols to exclude from trading (default: none, handled dynamically by KER)",
     )
 
     args = parser.parse_args()
@@ -267,6 +279,7 @@ def main():
             max_price=args.max_price,
             min_daily_volume=args.min_vol,
             blacklist=args.blacklist,
+            min_ker=args.min_ker,
         )
     elif args.universe == "nifty50":
         symbols = NIFTY_50_SUBSET[: args.top_momentum]

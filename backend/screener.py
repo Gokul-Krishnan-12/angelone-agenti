@@ -13,7 +13,7 @@ from .smartapi_client import smart_api_client
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BLACKLIST = {"SUZLON", "TIINDIA", "ICICIGI"}
+DEFAULT_BLACKLIST: set[str] = set()
 
 
 def calculate_kaufman_efficiency_ratio(
