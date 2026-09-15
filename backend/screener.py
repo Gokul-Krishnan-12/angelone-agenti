@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -173,6 +174,7 @@ class DynamicScreener:
         self.screener_stats: Dict[str, Dict[str, Any]] = {}
         self.daily_metrics_cache: Dict[str, Dict[str, Any]] = {}
         self._last_macro_eval_date: Optional[datetime.date] = None
+        self.last_run_successful: bool = True
 
     def get_stock_stats(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Retrieve latest calculated screener metrics for a symbol."""
@@ -271,6 +273,7 @@ class DynamicScreener:
                 s for s in fno if s not in NIFTY_50
             ]
 
+        self.last_run_successful = False
         try:
             # Batch instruments into chunks of 50 to respect SmartAPI payload limits
             quotes: dict = {}
@@ -278,11 +281,27 @@ class DynamicScreener:
             for i in range(0, len(universe), chunk_size):
                 chunk = universe[i : i + chunk_size]
                 instruments = [f"NSE:{symbol}" for symbol in chunk]
-                batch_res = smart_api_client.get_quote(instruments)
+                batch_res = None
+                for attempt in range(3):
+                    try:
+                        batch_res = smart_api_client.get_quote(instruments)
+                        if batch_res:
+                            break
+                    except Exception as ex:
+                        logger.warning(
+                            "Attempt %d/3 failed to fetch quotes for chunk (%d symbols): %s",
+                            attempt + 1,
+                            len(chunk),
+                            ex,
+                        )
+                    time.sleep(1.5)
                 if batch_res:
                     quotes.update(batch_res)
 
             if not quotes:
+                logger.warning(
+                    "Dynamic screener received empty quotes from SmartAPI; falling back to universe defaults."
+                )
                 return universe[:limit]
 
             day_fraction = self._calculate_day_fraction()
@@ -446,6 +465,7 @@ class DynamicScreener:
             top_stocks = [stock["symbol"] for stock in scored_stocks[:limit]]
             self.daily_watchlist = top_stocks
             self.screener_stats = stats_map
+            self.last_run_successful = bool(top_stocks)
 
             top_summary = ", ".join(
                 f"{s['symbol']}(score={s['score']}, KER={s['ker']}, rvol={s['rvol']}x, to={s['turnover_cr']}Cr)"
@@ -460,6 +480,7 @@ class DynamicScreener:
 
         except Exception as e:
             logger.error("Failed to generate dynamic F&O watchlist: %s", e)
+            self.last_run_successful = False
             return universe[:limit]
 
 

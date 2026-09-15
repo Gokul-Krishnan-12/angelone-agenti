@@ -152,10 +152,11 @@ class SmartApiClient:
             self.symbol_map[sym] = f"{sym}-EQ"
             self.symbol_map[tok] = f"{sym}-EQ"
 
-    def init(self, api_key: str, client_code: str = ""):
+    def init(self, api_key: str, client_code: str = "", timeout: int = 20):
         self.api_key = api_key
         self.client_code = client_code
-        self.smart_api = SmartConnect(api_key=api_key)
+        self.smart_api = SmartConnect(api_key=api_key, timeout=timeout)
+        self.smart_api.timeout = timeout
 
     def set_session_tokens(
         self,
@@ -319,6 +320,8 @@ class SmartApiClient:
             "token",
             "unauthorized",
             "ag8001",
+            "ag8002",
+            "ag8003",
             "ab1004",
             "session",
             "expired",
@@ -326,8 +329,12 @@ class SmartApiClient:
         )
         try:
             res = api_func(*args, **kwargs)
-            if isinstance(res, dict) and not res.get("status"):
-                err_code = str(res.get("errorcode", "")).upper()
+            if isinstance(res, dict) and (
+                not res.get("status") or res.get("success") is False
+            ):
+                err_code = str(
+                    res.get("errorcode") or res.get("errorCode") or ""
+                ).upper()
                 err_msg = str(res.get("message", "")).lower()
                 combined = f"{err_code} {err_msg}"
                 if any(k in combined for k in auth_keywords):
@@ -544,7 +551,7 @@ class SmartApiClient:
         if not self.smart_api:
             return []
         try:
-            res = self.smart_api.tradeBook()
+            res = self._execute_with_auth_retry(self.smart_api.tradeBook)
             if (
                 not res
                 or not res.get("status")
@@ -606,7 +613,9 @@ class SmartApiClient:
             if not formatted_orders:
                 return {}
 
-            res = self.smart_api.estimateCharges({"orders": formatted_orders})
+            res = self._execute_with_auth_retry(
+                self.smart_api.estimateCharges, {"orders": formatted_orders}
+            )
             if res and res.get("status") and isinstance(res.get("data"), dict):
                 return res["data"]
             return {}
@@ -802,7 +811,7 @@ class SmartApiClient:
         if not self.smart_api:
             return {}
         try:
-            res = self.smart_api.rmsLimit()
+            res = self._execute_with_auth_retry(self.smart_api.rmsLimit)
             data = res.get("data", {}) if (res and res.get("status")) else {}
 
             net = float(data.get("net", 0.0) or 0.0)
@@ -837,7 +846,7 @@ class SmartApiClient:
         if not self.smart_api:
             return []
         try:
-            res = self.smart_api.holding()
+            res = self._execute_with_auth_retry(self.smart_api.holding)
             holdings = res.get("data", []) if (res and res.get("status")) else []
             normalized = []
             for h in holdings:
@@ -891,7 +900,9 @@ class SmartApiClient:
         }
 
         try:
-            res = self.smart_api.getCandleData(historic_params)
+            res = self._execute_with_auth_retry(
+                self.smart_api.getCandleData, historic_params
+            )
             if (
                 not res
                 or not res.get("status")
@@ -929,7 +940,9 @@ class SmartApiClient:
             price_val = 0.0
             if self.smart_api and token:
                 try:
-                    data = self.smart_api.ltpData("NSE", symbol, token)
+                    data = self._execute_with_auth_retry(
+                        self.smart_api.ltpData, "NSE", symbol, token
+                    )
                     if data and data.get("status") and data.get("data"):
                         price_val = float(data["data"].get("ltp", 0.0))
                 except Exception:
@@ -959,8 +972,8 @@ class SmartApiClient:
         if self.smart_api and tokens_to_fetch:
             try:
                 # Use SmartAPI getMarketData
-                market_data = self.smart_api.getMarketData(
-                    "FULL", {"NSE": tokens_to_fetch}
+                market_data = self._execute_with_auth_retry(
+                    self.smart_api.getMarketData, "FULL", {"NSE": tokens_to_fetch}
                 )
                 if (
                     market_data
@@ -1001,7 +1014,9 @@ class SmartApiClient:
                 ltp = 0.0
                 if self.smart_api and token:
                     try:
-                        ltp_res = self.smart_api.ltpData("NSE", symbol, token)
+                        ltp_res = self._execute_with_auth_retry(
+                            self.smart_api.ltpData, "NSE", symbol, token
+                        )
                         if ltp_res and ltp_res.get("status") and ltp_res.get("data"):
                             ltp = float(ltp_res["data"].get("ltp", 0.0))
                     except Exception:

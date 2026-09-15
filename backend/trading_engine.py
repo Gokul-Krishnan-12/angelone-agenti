@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import sys
 import threading
 import time
@@ -12,6 +13,8 @@ from .scanner import scanner
 from .smartapi_client import smart_api_client
 from .ticker import ticker_manager
 from .utils import DateTimeEncoder
+
+logger = logging.getLogger(__name__)
 
 
 class TradingEngine:
@@ -178,28 +181,54 @@ class TradingEngine:
             self._push_log(
                 f"Running dynamic momentum, RVOL & institutional participation screener across {len(full_universe)} F&O stocks..."
             )
-            screened_stocks = screener_engine.generate_daily_watchlist(
-                universe=full_universe, limit=35
-            )
+            try:
+                screened_stocks = screener_engine.generate_daily_watchlist(
+                    universe=full_universe, limit=35
+                )
+            except Exception as e:
+                logger.error("Dynamic screener invocation failed: %s", e)
+                screened_stocks = []
+
+            screener_ok = getattr(screener_engine, "last_run_successful", True)
 
             # Preserve any currently open active trades so position monitoring and trailing exits are never lost
-            combined_watchlist = list(screened_stocks)
+            candidate_list = (
+                list(screened_stocks) if screened_stocks else list(full_universe[:35])
+            )
+            combined_watchlist = list(candidate_list)
             for sym in self.active_trades:
                 if sym not in combined_watchlist:
                     combined_watchlist.append(sym)
 
-            self.dynamic_watchlist = combined_watchlist
-            self._last_screener_time = now_ts
-            self._last_screener_date = today_date
+            if screener_ok and screened_stocks:
+                self.dynamic_watchlist = combined_watchlist
+                self._last_screener_time = now_ts
+                self._last_screener_date = today_date
 
-            self._push_log(
-                f"Dynamic Watchlist updated: Top {len(self.dynamic_watchlist)} in-play stocks selected "
-                f"(hourly re-screen): {', '.join(self.dynamic_watchlist[:10])}..."
-            )
-            try:
-                ticker_manager.subscribe(self.dynamic_watchlist)
-            except Exception:
-                pass
+                self._push_log(
+                    f"Dynamic Watchlist updated: Top {len(self.dynamic_watchlist)} in-play stocks selected "
+                    f"(hourly re-screen): {', '.join(self.dynamic_watchlist[:10])}..."
+                )
+                try:
+                    ticker_manager.subscribe(self.dynamic_watchlist)
+                except Exception:
+                    pass
+            else:
+                # If screening failed or quotes could not be fetched, set fallback if first run
+                if not getattr(self, "dynamic_watchlist", None):
+                    self.dynamic_watchlist = combined_watchlist
+                    self._push_log(
+                        f"Dynamic screener quotes unavailable; initialized default watchlist ({len(self.dynamic_watchlist)} stocks).",
+                        level="warning",
+                    )
+                # Reschedule retry in 5 minutes (300s) instead of waiting a full hour (3600s)
+                retry_seconds = 300
+                screener_interval = getattr(self, "screener_interval", 3600)
+                self._last_screener_time = now_ts - (screener_interval - retry_seconds)
+                self._push_log(
+                    "Dynamic screener encountered transient error or empty quotes. Will retry screening in 5 minutes.",
+                    level="warning",
+                )
 
         def handle_new_signal(signal):
             if signal["confidence"] >= 70:

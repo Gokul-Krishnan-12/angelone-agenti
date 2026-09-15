@@ -365,6 +365,17 @@ const PaperTrade: React.FC = () => {
             </button>
           )}
 
+          {activeTab === 'rejected' && rejectedTrades.length > 0 && (
+            <button
+              onClick={clearRejectedTrades}
+              className="text-xs text-surface-400 hover:text-loss-light flex items-center gap-1 transition-colors cursor-pointer"
+              title="Clear all recorded rejected setups"
+            >
+              <Trash2 size={13} />
+              <span>Clear Rejected Setups</span>
+            </button>
+          )}
+
           {activeTab === 'logs' && (
             <button
               onClick={clearLogs}
