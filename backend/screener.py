@@ -69,7 +69,7 @@ def evaluate_universe_candidate(
     min_price: float = 150.0,
     min_turnover_cr: float = 40.0,
     min_atr_pct: float = 1.5,
-    min_ker: float = 0.28,
+    min_ker: float = 0.35,
     min_rvol: float = 1.8,
 ) -> tuple[bool, str, Dict[str, Any]]:
     """Macro daily regime screening pipeline for universe candidates.
@@ -78,7 +78,7 @@ def evaluate_universe_candidate(
     1. Price Floor: LTP >= min_price (default: ₹150)
     2. 20-Day Average Daily Turnover: >= min_turnover_cr (default: ₹40 Cr)
     3. Daily ATR%: >= min_atr_pct (default: 1.5%)
-    4. Kaufman Efficiency Ratio (KER 20D): >= min_ker (default: 0.28)
+    4. Kaufman Efficiency Ratio (KER 20D): >= min_ker (default: 0.35)
     5. Morning RVOL (at or after 09:45 IST): >= min_rvol (default: 1.8)
 
     Returns
@@ -203,7 +203,7 @@ class DynamicScreener:
         min_price: float = 150.0,
         min_turnover_cr: float = 40.0,
         min_atr_pct: float = 1.5,
-        min_ker: float = 0.28,
+        min_ker: float = 0.35,
     ) -> Dict[str, Dict[str, Any]]:
         """Pre-market (before 09:15 IST) macro regime evaluation across candidate universe.
 
@@ -255,12 +255,12 @@ class DynamicScreener:
         min_price: float = 50.0,
         max_price: float = 100_000.0,
         daily_data_map: Optional[Dict[str, pd.DataFrame]] = None,
-        min_ker: float = 0.28,
+        min_ker: float = 0.35,
     ) -> List[str]:
         """AI/Algorithmic screener that selects the top high-momentum F&O stocks to trade today.
 
         Ranks stocks using:
-        1. Macro Regime Gate: Kaufman Efficiency Ratio (KER >= 0.28 on Daily bars).
+        1. Macro Regime Gate: Kaufman Efficiency Ratio (KER >= 0.35 on Daily bars).
         2. Intraday Momentum & Directional Velocity (open-to-LTP, close-to-LTP, range expansion).
         3. Relative Volume (RVOL) vs cross-universe pace and time-of-day expected run-rate.
         4. High Institutional Participation (turnover in Crores and absorption near day extremes).

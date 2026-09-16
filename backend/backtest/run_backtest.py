@@ -58,11 +58,11 @@ def screen_top_momentum_fno(
     max_price: float = 100_000.0,
     min_daily_volume: int = 0,
     blacklist: Optional[List[str]] = None,
-    min_ker: float = 0.28,
+    min_ker: float = 0.35,
 ) -> list[str]:
     """Rank F&O stocks by realized intraday range, directional velocity, and net trend.
 
-    Excludes low-efficiency regime stocks via Kaufman Efficiency Ratio (KER >= 0.28).
+    Excludes low-efficiency regime stocks via Kaufman Efficiency Ratio (KER >= 0.35).
     """
     import pandas as pd
     import yfinance as yf
@@ -256,8 +256,8 @@ def main():
     parser.add_argument(
         "--min-ker",
         type=float,
-        default=0.28,
-        help="Minimum Kaufman Efficiency Ratio gate (default: 0.28)",
+        default=0.35,
+        help="Minimum Kaufman Efficiency Ratio gate (default: 0.35)",
     )
     parser.add_argument(
         "--blacklist",
@@ -364,6 +364,8 @@ def main():
         period=args.period,
         output_path=args.output,
         capital=args.capital,
+        confluence=args.confluence,
+        min_rr=args.min_rr,
     )
 
 

@@ -44,6 +44,10 @@ from ..strategies.institutional_absorption import InstitutionalAbsorptionStrateg
 from ..strategies.keltner_breakout import KeltnerBreakoutStrategy
 from ..strategies.macd_cross import MACDCrossStrategy
 from ..strategies.mfi_exhaustion import MFIExhaustionStrategy
+from ..strategies.cpr_breakout_reversal import CPRBreakoutReversalStrategy
+from ..strategies.gap_fill import GapFillStrategy
+from ..strategies.liquidity_grab_reversal import LiquidityGrabReversalStrategy
+from ..strategies.opening_range_breakout import OpeningRangeBreakoutStrategy
 from ..strategies.order_block_fvg import OrderBlockFVGStrategy
 from ..strategies.psar_trend import PSARTrendStrategy
 from ..strategies.rsi_reversal import RSIReversalStrategy
@@ -80,6 +84,10 @@ ALL_STRATEGIES: Dict[str, Any] = {
     "order_block_fvg": OrderBlockFVGStrategy(),
     "cmf_accumulation": CMFAccumulationStrategy(),
     "volume_delta_divergence": VolumeDeltaDivergenceStrategy(),
+    "cpr_breakout_reversal": CPRBreakoutReversalStrategy(),
+    "opening_range_breakout": OpeningRangeBreakoutStrategy(),
+    "liquidity_grab_reversal": LiquidityGrabReversalStrategy(),
+    "gap_fill": GapFillStrategy(),
 }
 
 # ── Statutory Indian Market Friction Calculator ──────────────────────────────
@@ -144,7 +152,7 @@ def _apply_confluence(
     min_sl_pct: float = 1.0,
     regime_enabled: bool = True,
     regime_min_adx: float = 20.0,
-    regime_min_ker: float = 0.25,
+    regime_min_ker: float = 0.35,
     regime_block_choppy: bool = True,
 ) -> Optional[Dict]:
     dir_signals = [s for s in signals if s.get("direction") == direction]
@@ -247,7 +255,7 @@ class BacktestEngine:
         disabled_strategies: Optional[Set[str]] = None,
         regime_enabled: bool = True,
         regime_min_adx: float = 20.0,
-        regime_min_ker: float = 0.25,
+        regime_min_ker: float = 0.35,
         regime_block_choppy: bool = True,
     ):
         self.min_confluence = min_confluence
@@ -266,20 +274,33 @@ class BacktestEngine:
         self.regime_min_ker = regime_min_ker
         self.regime_block_choppy = regime_block_choppy
 
-        self.disabled_strats = (
-            disabled_strategies
-            if disabled_strategies is not None
-            else {
-                "williams_r",
-                "cci_reversal",
-                "adx_momentum",
-                "rsi_reversal",
-                "vwap_bounce",
-                "mfi_exhaustion",
-                "stochastic_reversal",
-                "supertrend",
-            }
-        )
+        if disabled_strategies is not None:
+            self.disabled_strats = set(disabled_strategies)
+        else:
+            try:
+                from ..config import config_manager
+                strat_cfg = config_manager.get_strategy_config()
+                self.disabled_strats = {
+                    s_id for s_id, cfg in strat_cfg.items()
+                    if not cfg.get("enabled", True)
+                }
+            except Exception:
+                self.disabled_strats = {
+                    "williams_r",
+                    "cci_reversal",
+                    "adx_momentum",
+                    "rsi_reversal",
+                    "vwap_bounce",
+                    "mfi_exhaustion",
+                    "stochastic_reversal",
+                    "supertrend",
+                    "psar_trend",
+                    "macd_cross",
+                    "ema_crossover",
+                    "tsi_cross",
+                    "awesome_oscillator",
+                    "stoc_rsi",
+                }
 
     def _run_strategies(self, df: pd.DataFrame, symbol: str) -> List[Dict]:
         """Run all strategies on df and return tagged signal list."""

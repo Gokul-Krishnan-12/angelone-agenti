@@ -22,6 +22,8 @@ def generate_report(
     period: str,
     output_path: str | None = None,
     capital: float = 20_000.0,
+    confluence: int = 3,
+    min_rr: float = 2.0,
 ) -> dict:
     """
     Compute backtest statistics and produce a markdown report.
@@ -131,7 +133,7 @@ def generate_report(
         "",
         f"**Symbols tested:** {', '.join(symbols)}  ",
         f"**Period:** {period}  |  **Interval:** {interval}  ",
-        "**Strategies:** 21 (with 2-family confluence gate, min R:R 1.8)  ",
+        f"**Strategies:** Agent Suite (confluence ≥ {confluence}, min R:R {min_rr})  ",
         "**ATR Trailing SL:** enabled (2.0 × ATR after +1.0R cushion)  ",
         "**Execution Guard:** Statutory Friction Deducted & Max 8 Trades/Day Capped  ",
         "",

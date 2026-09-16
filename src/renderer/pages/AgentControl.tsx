@@ -17,39 +17,37 @@ import {
 } from 'lucide-react';
 
 // Top 10 strategies selected by 6-month backtest P&L on 20 Nifty 50 stocks.
-// Ordered by backtest profitability (rank 1 = highest P&L).
+// ── Active Alpha Suite: Breakout, Institutional Volume, Reversals ──────────
 export const ALL_STRATEGIES = [
-  // ── High-win-rate strategies (research-validated, ~70-78% win rate) ────
   { id: 'cpr_breakout_reversal',   name: 'Central Pivot Range (CPR)', category: 'Smart Money', rank: 1, winRate: 75 },
   { id: 'liquidity_grab_reversal', name: 'Liquidity Grab Reversal',  category: 'Smart Money', rank: 2, winRate: 78 },
   { id: 'opening_range_breakout',  name: 'Opening Range Breakout',   category: 'Intraday',    rank: 3, winRate: 72 },
   { id: 'gap_fill',                name: 'Gap Fill Reversal',         category: 'Reversal',    rank: 4, winRate: 68 },
-  // ── Backtest-selected top-10 ───────────────────────────────────────────
-  { id: 'volume_delta_divergence', name: 'Volume Delta Divergence',  category: 'Smart Money', rank: 5, backtestPnl: 3007 },
-  { id: 'cmf_accumulation',        name: 'CMF Institutional Flow',  category: 'Smart Money', rank: 5, backtestPnl: 2216 },
-  { id: 'keltner_breakout',        name: 'Keltner Breakout',        category: 'Breakout',    rank: 6, backtestPnl: 2119 },
-  { id: 'williams_r',              name: 'Williams %R',             category: 'Oscillator',  rank: 7, backtestPnl: 2079 },
-  { id: 'cci_reversal',            name: 'CCI Reversal',            category: 'Oscillator',  rank: 8, backtestPnl: 1603 },
-  { id: 'macd_cross',              name: 'MACD Cross',              category: 'Momentum',    rank: 9, backtestPnl: 1346 },
-  { id: 'bollinger_breakout',      name: 'Bollinger Breakout',      category: 'Breakout',    rank: 10, backtestPnl: 1135 },
-  { id: 'stochastic_reversal',     name: 'Stochastic Reversal',     category: 'Oscillator',  rank: 11, backtestPnl:  909 },
-  { id: 'tsi_cross',               name: 'True Strength Index',     category: 'Momentum',    rank: 12, backtestPnl:  877 },
-  { id: 'psar_trend',              name: 'Parabolic SAR',           category: 'Trend',       rank: 13, backtestPnl:  567 },
+  { id: 'order_block_fvg',          name: 'Order Block & FVG',       category: 'Smart Money', rank: 5, winRate: 65 },
+  { id: 'institutional_absorption', name: 'Institutional Absorption',category: 'Smart Money', rank: 6, winRate: 64 },
+  { id: 'volume_delta_divergence', name: 'Volume Delta Divergence',  category: 'Smart Money', rank: 7, winRate: 62 },
+  { id: 'cmf_accumulation',        name: 'CMF Institutional Flow',  category: 'Smart Money', rank: 8, winRate: 60 },
+  { id: 'bollinger_breakout',      name: 'Bollinger Breakout',      category: 'Breakout',    rank: 9, winRate: 58 },
+  { id: 'keltner_breakout',        name: 'Keltner Breakout',        category: 'Breakout',    rank: 10, winRate: 57 },
+  { id: 'donchian_breakout',        name: 'Donchian Breakout',       category: 'Breakout',    rank: 11, winRate: 55 },
 ];
 
-// Disabled — underperformed in 6-month backtest. Can be re-enabled in Settings.
+// Disabled — lagging indicators & negative expectancy oscillators pruned to prevent fee drag
 export const DISABLED_STRATEGIES = [
-  { id: 'awesome_oscillator',       name: 'Awesome Oscillator',      category: 'Oscillator',  backtestPnl:  525 },
-  { id: 'stoc_rsi',                 name: 'Stochastic RSI',          category: 'Oscillator',  backtestPnl:  514 },
-  { id: 'adx_momentum',             name: 'ADX Momentum',            category: 'Momentum',    backtestPnl:  251 },
-  { id: 'donchian_breakout',        name: 'Donchian Breakout',       category: 'Breakout',    backtestPnl:  172 },
-  { id: 'rsi_reversal',             name: 'RSI Reversal',            category: 'Momentum',    backtestPnl:  131 },
-  { id: 'ema_crossover',            name: 'EMA Crossover',           category: 'Trend',       backtestPnl:   99 },
+  { id: 'psar_trend',              name: 'Parabolic SAR',           category: 'Trend',       backtestPnl: -8575 },
+  { id: 'macd_cross',              name: 'MACD Cross',              category: 'Momentum',    backtestPnl: -3384 },
+  { id: 'ema_crossover',            name: 'EMA Crossover',           category: 'Trend',       backtestPnl: -2201 },
+  { id: 'supertrend',               name: 'Supertrend',              category: 'Trend',       backtestPnl: -1238 },
+  { id: 'tsi_cross',               name: 'True Strength Index',     category: 'Momentum',    backtestPnl: -1476 },
+  { id: 'awesome_oscillator',       name: 'Awesome Oscillator',      category: 'Oscillator',  backtestPnl:  -912 },
+  { id: 'stoc_rsi',                 name: 'Stochastic RSI',          category: 'Oscillator',  backtestPnl:  -514 },
+  { id: 'stochastic_reversal',     name: 'Stochastic Reversal',     category: 'Oscillator',  backtestPnl:  -909 },
   { id: 'mfi_exhaustion',           name: 'MFI Exhaustion',          category: 'Volume',      backtestPnl:   -7 },
-  { id: 'order_block_fvg',          name: 'Order Block & FVG',       category: 'Smart Money', backtestPnl: -113 },
-  { id: 'institutional_absorption', name: 'Institutional Absorption',category: 'Smart Money', backtestPnl:    0 },
-  { id: 'supertrend',               name: 'Supertrend',              category: 'Trend',       backtestPnl:    0 },
-  { id: 'vwap_bounce',              name: 'VWAP Bounce',             category: 'Intraday',    backtestPnl:    0 },
+  { id: 'williams_r',              name: 'Williams %R',             category: 'Oscillator',  backtestPnl:  -941 },
+  { id: 'cci_reversal',            name: 'CCI Reversal',            category: 'Oscillator',  backtestPnl:  -826 },
+  { id: 'adx_momentum',             name: 'ADX Momentum',            category: 'Momentum',    backtestPnl:  -251 },
+  { id: 'rsi_reversal',             name: 'RSI Reversal',            category: 'Momentum',    backtestPnl:  -131 },
+  { id: 'vwap_bounce',              name: 'VWAP Bounce',             category: 'Intraday',    backtestPnl:  -172 },
 ];
 
 const AgentControl: React.FC = () => {
@@ -65,6 +63,20 @@ const AgentControl: React.FC = () => {
       window.electronAPI.ticker.subscribe(syms as any).catch(() => {});
     }
   }, [signals]);
+
+  // Sanitize enabled strategies to strictly contain only IDs belonging to ALL_STRATEGIES (removes old 8 lagging IDs)
+  useEffect(() => {
+    const validSet = new Set(ALL_STRATEGIES.map(s => s.id));
+    const clean = agentState.enabledStrategies.filter(id => validSet.has(id));
+    if (agentState.enabledStrategies.length === 0) {
+      const allActive = ALL_STRATEGIES.map(s => s.id);
+      setAgentState({ enabledStrategies: allActive });
+      saveStrategiesToBackend(allActive);
+    } else if (clean.length !== agentState.enabledStrategies.length) {
+      setAgentState({ enabledStrategies: clean });
+      saveStrategiesToBackend(clean);
+    }
+  }, []);
 
   const handleToggle = async () => {
     try {
@@ -88,7 +100,7 @@ const AgentControl: React.FC = () => {
 
   const saveStrategiesToBackend = (strategiesList: string[]) => {
     const strategySettings: Record<string, { enabled: boolean }> = {};
-    ALL_STRATEGIES.forEach(s => {
+    [...ALL_STRATEGIES, ...DISABLED_STRATEGIES].forEach(s => {
       strategySettings[s.id] = { enabled: strategiesList.includes(s.id) };
     });
     window.electronAPI?.invoke('settings:save', { strategies: strategySettings });
@@ -224,13 +236,13 @@ const AgentControl: React.FC = () => {
             </div>
           </div>
 
-          {/* Active Technical Strategies (20 Strategies) */}
+          {/* Active Technical Strategies (11 Alpha Strategies) */}
           <div className="bg-surface-800/90 backdrop-blur-sm border border-surface-700/80 rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-surface-700/70">
               <div>
                 <h2 className="text-sm font-bold uppercase tracking-wider text-surface-300 flex items-center gap-2">
                   <Layers size={16} className="text-accent-light" />
-                  <span>Technical TA Strategies ({agentState.enabledStrategies.length}/{ALL_STRATEGIES.length} Active)</span>
+                  <span>Technical TA Strategies ({agentState.enabledStrategies.filter(id => ALL_STRATEGIES.some(s => s.id === id)).length}/{ALL_STRATEGIES.length} Active)</span>
                 </h2>
                 <p className="text-xs text-surface-400 mt-0.5">Toggle individual technical algorithms to match market conditions.</p>
               </div>

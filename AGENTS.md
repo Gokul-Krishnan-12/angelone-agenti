@@ -202,16 +202,17 @@ $$\text{Volatility} = \sum_{i=0}^{N-1} | \text{Close}_{t-i} - \text{Close}_{t-i-
 $$\text{KER} = \frac{\text{Direction}}{\text{Volatility}} \in [0.0, 1.0]$$
 
 - $\text{KER} \ge 0.28$: Clean, directional momentum trend.
-- $\text{KER} < 0.25$: Choppy, noisy, mean-reverting regime.
+- $\text{KER} \ge 0.35$: Clean, directional momentum trend.
+- $\text{KER} < 0.35$: Choppy, noisy, mean-reverting regime.
 
 ### 5.2 Market Regime States & Trade Gating
 Evaluated using ADX(14), +DI/-DI, KER(20), 50 EMA, and Bollinger Band Squeeze width ($< 1.8\%$ bandwidth):
 
 | Market Regime | Technical Criteria | Permitted Trades | Blocked Trades |
 | :--- | :--- | :--- | :--- |
-| **`TRENDING_BULL`** | ADX $\ge 20$, Close $> 50$ EMA, +DI $>$-DI, KER $\ge 0.25$ | BUY Breakouts, BUY Trend Continuation | Counter-trend SELL shorts |
-| **`TRENDING_BEAR`** | ADX $\ge 20$, Close $< 50$ EMA, -DI $> $+DI, KER $\ge 0.25$ | SELL Breakouts, SELL Trend Continuation | Counter-trend BUY longs |
-| **`CHOPPY_RANGE`** | ADX $< 20$ OR KER $< 0.25$ OR Bollinger Squeeze $< 1.8\%$ | Mean Reversion, Range Oscillators | **ALL Breakout & Trend entries blocked** (prevents whipsaws) |
+| **`TRENDING_BULL`** | ADX $\ge 20$, Close $> 50$ EMA, +DI $>$-DI, KER $\ge 0.35$ | BUY Breakouts, BUY Trend Continuation | Counter-trend SELL shorts |
+| **`TRENDING_BEAR`** | ADX $\ge 20$, Close $< 50$ EMA, -DI $> $+DI, KER $\ge 0.35$ | SELL Breakouts, SELL Trend Continuation | Counter-trend BUY longs |
+| **`CHOPPY_RANGE`** | ADX $< 20$ OR KER $< 0.35$ OR Bollinger Squeeze $< 1.8\%$ | Mean Reversion, Range Oscillators | **ALL Breakout & Trend entries blocked** (prevents whipsaws) |
 | **`VOLATILE_EXPANSION`** | Outsized candle expansion / transitional volatility | High-conviction structure/volume setups | Aggressive breakouts |
 
 ### 5.3 Macro Universe Screening Pipeline (Top 35 Stocks)
@@ -219,7 +220,7 @@ Candidates from the 180+ F&O universe must pass 5 quantitative gates to be inclu
 1. **Price Floor**: $\text{LTP} \ge ₹150$ (eliminates penny stocks with high bid-ask friction).
 2. **20-Day Average Daily Turnover**: $\ge ₹40\text{ Crore}$ (guarantees institutional liquidity).
 3. **Daily ATR%**: $\ge 1.5\%$ (ensures sufficient intraday expansion range).
-4. **Kaufman Efficiency Ratio (20D)**: $\text{KER} \ge 0.28$ (screens out sideways consolidations).
+4. **Kaufman Efficiency Ratio (20D)**: $\text{KER} \ge 0.35$ (screens out sideways consolidations and whipsaw chop).
 5. **Morning RVOL (after 09:45 IST)**: $\ge 1.8\times$ average relative volume.
 
 ### 5.4 Resilient Data Fetching & Auto-Reauthentication

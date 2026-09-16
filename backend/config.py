@@ -37,7 +37,7 @@ class ConfigManager:
                 # ── Market Regime Filter ──────────────────────────
                 "marketRegimeFilterEnabled": True,  # quantitative regime & volatility filter
                 "marketRegimeMinADX": 20.0,  # trend strength threshold
-                "marketRegimeMinKER": 0.25,  # Kaufman efficiency ratio threshold
+                "marketRegimeMinKER": 0.35,  # Kaufman efficiency ratio threshold
                 "marketRegimeBlockChoppyBreakouts": True,  # suppress false-breakout churn in chop
                 # ── Trailing stop-loss ────────────────────────────
                 "trailingSlEnabled": True,  # enable ATR trailing SL
@@ -176,21 +176,23 @@ class ConfigManager:
             return ""
 
     def load(self):
+        import copy
+
         if self.config_file.exists():
             try:
                 with open(self.config_file, "r") as f:
                     loaded = json.load(f)
 
-                self.config = self.default_config.copy()
+                self.config = copy.deepcopy(self.default_config)
                 for k, v in loaded.items():
                     if isinstance(v, dict) and k in self.config:
                         self.config[k].update(v)
                     else:
                         self.config[k] = v
             except json.JSONDecodeError:
-                self.config = self.default_config.copy()
+                self.config = copy.deepcopy(self.default_config)
         else:
-            self.config = self.default_config.copy()
+            self.config = copy.deepcopy(self.default_config)
             self.save()
 
     def save(self):
@@ -266,12 +268,15 @@ class ConfigManager:
         self.save()
 
     def get_risk_config(self):
+        self.load()
         return self.config.get("risk", self.default_config["risk"])
 
     def get_strategy_config(self):
+        self.load()
         return self.config.get("strategies", self.default_config["strategies"])
 
     def get_watchlist(self):
+        self.load()
         return self.config.get("watchlist", self.default_config["watchlist"])
 
     def get_notifications_config(self) -> dict:

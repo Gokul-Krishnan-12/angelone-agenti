@@ -2,9 +2,9 @@
 Market Regime Filter & Volatility Classifier.
 
 Quantitatively classifies market structure into:
-- TRENDING_BULL: Strong directional uptrend (ADX >= 20, Close > 50 EMA, +DI > -DI, KER >= 0.25)
-- TRENDING_BEAR: Strong directional downtrend (ADX >= 20, Close < 50 EMA, -DI > +DI, KER >= 0.25)
-- CHOPPY_RANGE: Range-bound consolidation or low-volatility squeeze (ADX < 20 or KER < 0.25)
+- TRENDING_BULL: Strong directional uptrend (ADX >= 20, Close > 50 EMA, +DI > -DI, KER >= 0.35)
+- TRENDING_BEAR: Strong directional downtrend (ADX >= 20, Close < 50 EMA, -DI > +DI, KER >= 0.35)
+- CHOPPY_RANGE: Range-bound consolidation or low-volatility squeeze (ADX < 20 or KER < 0.35)
 - VOLATILE_EXPANSION: Outsized candle expansion / volatility explosion
 
 Provides trade gating to prevent false breakout whipsaws and fee churn during
@@ -66,7 +66,7 @@ def classify_market_regime(
     adx_period: int = 14,
     ker_period: int = 20,
     min_adx: float = 20.0,
-    min_ker: float = 0.25,
+    min_ker: float = 0.35,
 ) -> MarketRegimeResult:
     """Classify the current market regime from candle dataframe.
 
@@ -76,7 +76,7 @@ def classify_market_regime(
     adx_period : Lookback window for ADX & DMI (default: 14)
     ker_period : Lookback window for Kaufman Efficiency Ratio (default: 20)
     min_adx    : Threshold for trend strength (default: 20.0)
-    min_ker    : Threshold for directional efficiency (default: 0.25)
+    min_ker    : Threshold for directional efficiency (default: 0.35)
     """
     if df is None or len(df) < max(adx_period + 5, 20):
         return MarketRegimeResult(

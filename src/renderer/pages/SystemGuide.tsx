@@ -465,9 +465,6 @@ const SystemGuide: React.FC = () => {
                 <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white">
                   System Architecture & Strategy Guide
                 </h1>
-                <span className="hidden sm:inline-flex text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-accent-light/15 text-accent-light border border-accent-light/30">
-                  v2.4 Quant Core
-                </span>
               </div>
             </div>
             <p className="text-sm text-surface-300 max-w-2xl leading-relaxed">
@@ -521,18 +518,16 @@ const SystemGuide: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer ${
-                activeTab === tab.id
+              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer ${activeTab === tab.id
                   ? 'bg-accent-light text-surface-950 shadow-lg shadow-accent-DEFAULT/20'
                   : 'text-surface-300 hover:text-white bg-surface-900/60 hover:bg-surface-800 border border-surface-700/60'
-              }`}
+                }`}
             >
               {tab.icon}
               <span>{tab.label}</span>
               {tab.count && (
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                  activeTab === tab.id ? 'bg-surface-950 text-accent-light' : 'bg-surface-800 text-surface-400'
-                }`}>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${activeTab === tab.id ? 'bg-surface-950 text-accent-light' : 'bg-surface-800 text-surface-400'
+                  }`}>
                   {tab.count}
                 </span>
               )}
@@ -1076,16 +1071,14 @@ const SystemGuide: React.FC = () => {
                   <button
                     key={cat}
                     onClick={() => setStrategyFilter(cat)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-                      strategyFilter === cat
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${strategyFilter === cat
                         ? 'bg-accent-light text-surface-950 font-bold shadow'
                         : 'bg-surface-900 text-surface-400 hover:text-white hover:bg-surface-700 border border-surface-700/50'
-                    }`}
+                      }`}
                   >
                     <span>{cat}</span>
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                      strategyFilter === cat ? 'bg-surface-950 text-accent-light font-bold' : 'bg-surface-800 text-surface-400'
-                    }`}>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${strategyFilter === cat ? 'bg-surface-950 text-accent-light font-bold' : 'bg-surface-800 text-surface-400'
+                      }`}>
                       {count}
                     </span>
                   </button>
@@ -1205,19 +1198,17 @@ const SystemGuide: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer border ${
-                activeTab === tab.id
+              className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer border ${activeTab === tab.id
                   ? 'bg-accent-light/15 text-white border-accent-light/40 shadow-sm'
                   : 'bg-surface-900/60 text-surface-400 border-surface-700/60 hover:bg-surface-800/80 hover:text-surface-200'
-              }`}
+                }`}
             >
               {tab.icon}
               {tab.label}
               {tab.count && (
                 <span
-                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
-                    activeTab === tab.id ? 'bg-surface-950 text-accent-light' : 'bg-surface-800 text-surface-400'
-                  }`}
+                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${activeTab === tab.id ? 'bg-surface-950 text-accent-light' : 'bg-surface-800 text-surface-400'
+                    }`}
                 >
                   {tab.count}
                 </span>
@@ -1528,11 +1519,10 @@ const SystemGuide: React.FC = () => {
                   </div>
                 </div>
 
-                <div className={`p-4 rounded-xl border text-center font-bold text-sm ${
-                  feeCalculation.passesGate
+                <div className={`p-4 rounded-xl border text-center font-bold text-sm ${feeCalculation.passesGate
                     ? 'bg-profit-DEFAULT/10 border-profit-DEFAULT/30 text-profit-light'
                     : 'bg-loss-DEFAULT/10 border-loss-DEFAULT/30 text-loss-light'
-                }`}>
+                  }`}>
                   {feeCalculation.passesGate ? (
                     <div className="flex items-center justify-center gap-2">
                       <CheckCircle2 size={18} />

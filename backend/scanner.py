@@ -244,7 +244,7 @@ class Scanner:
         trend_aligned: bool = True,
         regime_enabled: bool = True,
         regime_min_adx: float = 20.0,
-        regime_min_ker: float = 0.25,
+        regime_min_ker: float = 0.35,
         regime_block_choppy: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
@@ -366,7 +366,7 @@ class Scanner:
         trend_aligned = bool(risk_config.get("trendAlignmentFilter", True))
         regime_enabled = bool(risk_config.get("marketRegimeFilterEnabled", True))
         regime_min_adx = float(risk_config.get("marketRegimeMinADX", 20.0))
-        regime_min_ker = float(risk_config.get("marketRegimeMinKER", 0.25))
+        regime_min_ker = float(risk_config.get("marketRegimeMinKER", 0.35))
         regime_block_choppy = bool(
             risk_config.get("marketRegimeBlockChoppyBreakouts", True)
         )

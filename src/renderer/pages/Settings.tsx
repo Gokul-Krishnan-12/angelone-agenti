@@ -367,7 +367,7 @@ const Settings: React.FC = () => {
                   </label>
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-surface-400 font-mono">
-                  <span>Regime Gate: ADX ≥ {localSettings.risk?.marketRegimeMinADX ?? 20} &bull; KER ≥ {localSettings.risk?.marketRegimeMinKER ?? 0.25}</span>
+                  <span>Regime Gate: ADX ≥ {localSettings.risk?.marketRegimeMinADX ?? 20} &bull; KER ≥ {localSettings.risk?.marketRegimeMinKER ?? 0.35}</span>
                   <span className="text-accent-light font-bold">1:2 R:R Active</span>
                 </div>
               </div>
