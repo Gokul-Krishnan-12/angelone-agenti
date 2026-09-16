@@ -37,10 +37,13 @@ Signal Families
 """
 
 import datetime
+import logging
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from .config import config_manager
 from .market_regime import classify_market_regime, is_trade_allowed_by_regime
@@ -224,7 +227,7 @@ class Scanner:
             self.last_cache_time[instrument_token] = now
             return df, False
         except Exception as e:
-            print(f"Error fetching candles for {tradingsymbol}: {e}")
+            logger.warning("Error fetching candles for %s: %s", tradingsymbol, e)
             return pd.DataFrame(), False
 
     # ──────────────────────────────────────────────────────────────────

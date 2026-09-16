@@ -297,6 +297,7 @@ class DynamicScreener:
                     time.sleep(1.5)
                 if batch_res:
                     quotes.update(batch_res)
+                time.sleep(0.5)
 
             if not quotes:
                 logger.warning(

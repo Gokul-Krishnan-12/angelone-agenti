@@ -30,6 +30,7 @@ export const MARKET_HISTORICAL = 'market:historical';
 export const MARKET_INSTRUMENTS = 'market:instruments';
 export const MARKET_SEARCH = 'market:search';
 export const MARKET_STATUS = 'market:status';
+export const MARKET_ESTIMATE_CHARGES = 'market:estimate-charges';
 
 // ─── WebSocket / Ticker ───────────────────────────────────────────
 export const TICKER_SUBSCRIBE = 'ticker:subscribe';

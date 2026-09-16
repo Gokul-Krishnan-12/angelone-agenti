@@ -98,6 +98,10 @@ export function setupIpcHandlers() {
     return await pythonBridge.call('market_status');
   });
 
+  ipcMain.handle(channels.MARKET_ESTIMATE_CHARGES, async (_, params: any) => {
+    return await pythonBridge.call('estimate_charges', params);
+  });
+
   // ─── Ticker ───────────────────────────────────────────────────────
   
   ipcMain.handle(channels.TICKER_SUBSCRIBE, async (_, tokens: number[]) => {

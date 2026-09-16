@@ -188,6 +188,7 @@ const Dashboard: React.FC = () => {
             <span>{scanning ? 'Scanning...' : 'Scan Now'}</span>
           </button>
 
+
           <button
             onClick={handleRefresh}
             disabled={isReloading}

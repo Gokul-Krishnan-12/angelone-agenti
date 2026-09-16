@@ -4,6 +4,7 @@ import logging
 import sys
 import threading
 import time
+from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
 from .config import config_manager
@@ -34,6 +35,9 @@ class TradingEngine:
         self.screener_interval = 3600  # 1 hour periodic dynamic re-screening
         self._last_screener_time = 0.0
         self._last_screener_date = None
+        self._screener_slots_completed = set()
+        self._screener_retry_due_at = 0.0
+        self._screener_failed_slot = None
 
     def start(self, mode: str = "confirm"):
         if self.running:
@@ -68,6 +72,8 @@ class TradingEngine:
         sys.stdout.flush()
 
     def _push_log(self, message: str, level: str = "info"):
+        log_fn = getattr(logger, level.lower(), logger.info)
+        log_fn(message)
         event = {
             "event": "log:entry",
             "data": {
@@ -161,15 +167,54 @@ class TradingEngine:
         else:
             self._notified_cannot_trade = False
 
-        # Hourly Dynamic Screener: re-screen every 1 hour (or on new day) for top 35 in-play stocks
+        # Clock-aligned Dynamic Screener: runs at 09:30 IST, then hourly (10:30, 11:30, 12:30, 13:30, 14:30 IST)
+        now_dt = datetime.datetime.now()
+        today_date = now_dt.date()
+        now_time_str = now_dt.strftime("%H:%M")
         now_ts = time.time()
-        today_date = datetime.date.today()
-        screener_due = (
-            not getattr(self, "dynamic_watchlist", None)
-            or getattr(self, "_last_screener_date", None) != today_date
-            or (now_ts - getattr(self, "_last_screener_time", 0.0))
-            >= getattr(self, "screener_interval", 3600)
-        )
+
+        if getattr(self, "_last_screener_date", None) != today_date:
+            self._screener_slots_completed = set()
+            self._last_screener_date = today_date
+            self._screener_retry_due_at = 0.0
+            self._screener_failed_slot = None
+
+        SCREENER_SLOTS = ["09:30", "10:30", "11:30", "12:30", "13:30", "14:30"]
+        screener_due = False
+        slot_label = ""
+        current_due_slot = None
+
+        if not getattr(self, "dynamic_watchlist", None):
+            screener_due = True
+            passed = [s for s in SCREENER_SLOTS if now_time_str >= s]
+            if passed:
+                current_due_slot = passed[-1]
+                slot_label = f"Initial ({current_due_slot} IST)"
+                for s in passed:
+                    self._screener_slots_completed.add(s)
+            else:
+                current_due_slot = "09:30"
+                slot_label = "Initial (Pre-Market/Early)"
+        else:
+            for s in SCREENER_SLOTS:
+                if now_time_str >= s and s not in self._screener_slots_completed:
+                    screener_due = True
+                    current_due_slot = s
+                    slot_label = f"{s} IST"
+                    break
+
+            # Fallback for hourly elapsed interval (or simulated test clocks)
+            if not screener_due and (now_ts - getattr(self, "_last_screener_time", 0.0)) >= getattr(self, "screener_interval", 3600):
+                screener_due = True
+                passed = [s for s in SCREENER_SLOTS if now_time_str >= s]
+                current_due_slot = passed[-1] if passed else "Hourly"
+                slot_label = f"Hourly ({now_time_str} IST)"
+
+            if not screener_due and getattr(self, "_screener_retry_due_at", 0.0) > 0:
+                if now_ts >= self._screener_retry_due_at:
+                    screener_due = True
+                    current_due_slot = getattr(self, "_screener_failed_slot", "09:30")
+                    slot_label = f"Retry ({current_due_slot} IST)"
 
         if screener_due:
             from .fno_universe import get_fno_universe
@@ -179,7 +224,7 @@ class TradingEngine:
             full_universe = list(set(get_fno_universe() + custom_watchlist))
 
             self._push_log(
-                f"Running dynamic momentum, RVOL & institutional participation screener across {len(full_universe)} F&O stocks..."
+                f"Running dynamic momentum, RVOL & institutional participation screener [{slot_label}] across {len(full_universe)} F&O stocks..."
             )
             try:
                 screened_stocks = screener_engine.generate_daily_watchlist(
@@ -203,11 +248,14 @@ class TradingEngine:
             if screener_ok and screened_stocks:
                 self.dynamic_watchlist = combined_watchlist
                 self._last_screener_time = now_ts
-                self._last_screener_date = today_date
+                self._screener_retry_due_at = 0.0
+                self._screener_failed_slot = None
+                if current_due_slot:
+                    self._screener_slots_completed.add(current_due_slot)
 
+                top_preview = ", ".join(self.dynamic_watchlist[:10])
                 self._push_log(
-                    f"Dynamic Watchlist updated: Top {len(self.dynamic_watchlist)} in-play stocks selected "
-                    f"(hourly re-screen): {', '.join(self.dynamic_watchlist[:10])}..."
+                    f"Dynamic Watchlist updated [{slot_label}]: Top {len(self.dynamic_watchlist)} in-play stocks selected: {top_preview}..."
                 )
                 try:
                     ticker_manager.subscribe(self.dynamic_watchlist)
@@ -221,12 +269,11 @@ class TradingEngine:
                         f"Dynamic screener quotes unavailable; initialized default watchlist ({len(self.dynamic_watchlist)} stocks).",
                         level="warning",
                     )
-                # Reschedule retry in 5 minutes (300s) instead of waiting a full hour (3600s)
-                retry_seconds = 300
-                screener_interval = getattr(self, "screener_interval", 3600)
-                self._last_screener_time = now_ts - (screener_interval - retry_seconds)
+                # Reschedule retry in 5 minutes (300s)
+                self._screener_retry_due_at = now_ts + 300
+                self._screener_failed_slot = current_due_slot
                 self._push_log(
-                    "Dynamic screener encountered transient error or empty quotes. Will retry screening in 5 minutes.",
+                    f"Dynamic screener [{slot_label}] encountered transient error or empty quotes. Will retry screening in 5 minutes.",
                     level="warning",
                 )
 
@@ -264,6 +311,77 @@ class TradingEngine:
         if self.active_trades:
             self._reevaluate_positions()
 
+    def manual_scan(self) -> List[Dict[str, Any]]:
+        """Run on-demand dynamic screener and multi-strategy market scan with real-time UI Activity Logs."""
+        from .fno_universe import get_fno_universe
+        from .screener import screener_engine
+        from .ticker import ticker_manager
+
+        custom_watchlist = config_manager.get_watchlist()
+        full_universe = list(set(get_fno_universe() + custom_watchlist))
+
+        self._push_log(
+            f"Manual Scan requested: Running dynamic momentum, RVOL & institutional flow screener across {len(full_universe)} F&O stocks...",
+            level="info",
+        )
+
+        try:
+            screened_stocks = screener_engine.generate_daily_watchlist(
+                universe=full_universe, limit=35
+            )
+        except Exception as e:
+            logger.error("Manual dynamic screener invocation failed: %s", e)
+            screened_stocks = []
+
+        screener_ok = getattr(screener_engine, "last_run_successful", True)
+        candidate_list = (
+            list(screened_stocks) if screened_stocks else list(full_universe[:35])
+        )
+        combined_watchlist = list(candidate_list)
+        for sym in self.active_trades:
+            if sym not in combined_watchlist:
+                combined_watchlist.append(sym)
+
+        self.dynamic_watchlist = combined_watchlist
+        self._last_screener_time = time.time()
+        try:
+            ticker_manager.subscribe(self.dynamic_watchlist)
+        except Exception:
+            pass
+
+        top_preview = ", ".join(self.dynamic_watchlist[:10])
+        self._push_log(
+            f"Dynamic Watchlist updated [Manual Scan]: Top {len(self.dynamic_watchlist)} in-play stocks shortlisted: {top_preview}...",
+            level="info",
+        )
+
+        self._push_log(
+            f"Scanning shortlisted {len(self.dynamic_watchlist)} stocks across 25 technical strategies...",
+            level="info",
+        )
+
+        def handle_manual_signal(signal):
+            if signal.get("confidence", 0) >= 70:
+                self._push_signal(signal)
+
+        signals = scanner.scan_watchlist(
+            self.dynamic_watchlist, on_signal=handle_manual_signal
+        )
+
+        if signals:
+            syms = ", ".join(s["tradingsymbol"] for s in signals[:5])
+            self._push_log(
+                f"Manual scan complete: {len(signals)} setup(s) identified ({syms}).",
+                level="order",
+            )
+        else:
+            self._push_log(
+                f"Manual scan complete: 0 trade setups met the 3-family confluence & R:R gate across {len(self.dynamic_watchlist)} stocks.",
+                level="info",
+            )
+
+        return signals or []
+
     def execute_signal(self, signal: dict):
         can_trade, reason = risk_manager.can_trade()
         if not can_trade:
@@ -297,6 +415,30 @@ class TradingEngine:
                 f"Position size calculated as 0 for {tradingsymbol}. Skipping trade."
             )
             return False
+
+        # Pre-Trade Statutory Friction Guard (Angel One estimateCharges validation)
+        charges_info = smart_api_client.estimate_round_trip_charges(
+            tradingsymbol,
+            entry_price,
+            target,
+            qty,
+            product="INTRADAY",
+            exchange=exchange,
+            direction=direction,
+        )
+        if not charges_info.get("is_friction_safe", True):
+            self._push_log(
+                f"Statutory Friction Guard: Trade on {tradingsymbol} rejected. "
+                f"Expected gain ₹{charges_info.get('gross_pnl', 0)} < 3.5x Angel One charges (₹{charges_info.get('total_charges', 0)}).",
+                level="warning",
+            )
+            return False
+
+        self._push_log(
+            f"Friction check passed for {tradingsymbol}: Net gain ₹{charges_info.get('net_pnl', 0)} "
+            f"(Charges: ₹{charges_info.get('total_charges', 0)}, Multiple: {charges_info.get('friction_multiple', 0)}x)",
+            level="info",
+        )
 
         transaction_type = "BUY" if direction == "BUY" else "SELL"
 

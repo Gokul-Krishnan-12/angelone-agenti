@@ -329,18 +329,7 @@ def handle_request(req):
             return success(config_manager.config)
 
         elif method in ("scan_now", "agent_scan_now"):
-            from .fno_universe import get_fno_universe
-            from .screener import screener_engine
-
-            custom_watchlist = config_manager.get_watchlist()
-            full_universe = list(set(get_fno_universe() + custom_watchlist))
-
-            # Run the dynamic screener for top 35 momentum & in-play F&O stocks
-            top_stocks = screener_engine.generate_daily_watchlist(
-                universe=full_universe, limit=35
-            )
-            # Scan top stocks
-            signals = scanner.scan_watchlist(top_stocks)
+            signals = trading_engine.manual_scan()
             return success(signals)
 
         elif method == "log_get_all":
@@ -482,6 +471,19 @@ def handle_request(req):
             from .market_hours import get_market_status
 
             return success(get_market_status())
+
+        elif method in ("estimate_charges", "calculate_charges", "brokerage_estimate"):
+            symbol = str(params.get("symbol") or params.get("tradingsymbol") or "SBIN")
+            entry_price = float(params.get("entry_price") or params.get("price") or 100.0)
+            target_price = float(params.get("target_price") or params.get("target") or (entry_price * 1.02))
+            quantity = int(params.get("quantity") or params.get("qty") or 1)
+            product = str(params.get("product") or params.get("product_type") or "INTRADAY")
+            exchange = str(params.get("exchange") or "NSE")
+            direction = str(params.get("direction") or "BUY")
+            res = smart_api_client.estimate_round_trip_charges(
+                symbol, entry_price, target_price, quantity, product, exchange, direction
+            )
+            return success(res)
 
         else:
             return error(-32601, f"Method '{method}' not found")

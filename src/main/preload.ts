@@ -37,6 +37,7 @@ try {
       instruments: (exchange: string) => electron.ipcRenderer.invoke(channels.MARKET_INSTRUMENTS, exchange),
       search: (query: string) => electron.ipcRenderer.invoke(channels.MARKET_SEARCH, query),
       status: () => electron.ipcRenderer.invoke(channels.MARKET_STATUS),
+      estimateCharges: (params: any) => electron.ipcRenderer.invoke(channels.MARKET_ESTIMATE_CHARGES, params),
     },
     ticker: {
       subscribe: (tokens: number[]) => electron.ipcRenderer.invoke(channels.TICKER_SUBSCRIBE, tokens),

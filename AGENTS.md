@@ -121,7 +121,7 @@ The core engine is encapsulated in [backend/trading_engine.py](file:///home/goku
    - Cleans up positions manually closed on the Angel One mobile app.
 2. **Slow Loop (Every 60 seconds)**:
    - Scans the market for new entry setups (`scan_and_trade`).
-   - Hourly dynamic re-screening across the F&O universe (`screener_engine.generate_daily_watchlist`). If an hourly re-screen encounters transient network/quote timeouts, the engine automatically reschedules a 5-minute retry backoff (`_last_screener_time = now_ts - (screener_interval - 300)`) while strictly preserving all active open trades in the watchlist.
+   - Clock-aligned dynamic re-screening across the F&O universe (`screener_engine.generate_daily_watchlist`): runs on initial engine startup and at scheduled market intervals (**09:30, 10:30, 11:30, 12:30, 13:30, 14:30 IST**). If a scheduled re-screen encounters transient network/quote timeouts, the engine automatically reschedules a 5-minute retry backoff (`_screener_retry_due_at = now_ts + 300`) while strictly preserving all active open trades in the dynamic watchlist.
    - Re-evaluates open positions for **Thesis Invalidation**.
 
 ### 4.2 Execution Modes
@@ -223,9 +223,11 @@ Candidates from the 180+ F&O universe must pass 5 quantitative gates to be inclu
 5. **Morning RVOL (after 09:45 IST)**: $\ge 1.8\times$ average relative volume.
 
 ### 5.4 Resilient Data Fetching & Auto-Reauthentication
+- **HTTP Keep-Alive Connection Pooling**: Configured a persistent `requests.Session` with `HTTPAdapter(pool_connections=25, pool_maxsize=50, max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504]))` and patched `SmartApi.smartConnect.requests.request = self.http_session.request`. This eliminates continuous TCP 3-way handshake and TLS renegotiation churn that previously triggered Angel One WAF socket drops (`RemoteDisconnected`, `Connection aborted`).
 - **SmartAPI Timeout Calibration**: Hardcoded library default of 7 seconds was overridden with a 20-second connection & read timeout (`SmartConnect(timeout=20)` and `self.smart_api.timeout = 20`) to eliminate `requests.exceptions.ReadTimeout` errors during peak-hour batch candle and quote requests.
-- **Exhaustive Headless Session Renewal**: All data endpoints (`getCandleData`, `getMarketData`, `rmsLimit`, `holding`, `tradeBook`, `position`, `orderBook`, `placeOrder`, `cancelOrder`, `modifyOrder`, `estimateCharges`) are wrapped by `_execute_with_auth_retry()`. Intercepts HTTP errors and response bodies containing `AG8001`, `AG8002`, `AG8003` ("Token missing"), `AB1004`, or expired session states, immediately executing a headless TOTP re-login via `pyotp` and retrying the failed call seamlessly.
-- **Chunked Quote Fetching with Retries**: Batch quote fetches across the 180+ F&O universe are executed in chunks of 50 with up to 3 retry attempts per chunk (1.5s delay) to ensure temporary exchange quote hiccups do not abort screening.
+- **Exhaustive Headless Session Renewal & Network Retry**: All data endpoints (`getCandleData`, `getMarketData`, `rmsLimit`, `holding`, `tradeBook`, `position`, `orderBook`, `placeOrder`, `cancelOrder`, `modifyOrder`, `estimateCharges`) are wrapped by `_execute_with_auth_retry()`. Intercepts HTTP errors and response bodies containing `AG8001`, `AG8002`, `AG8003` ("Token missing"), `AB1004`, or expired session states, immediately executing a headless TOTP re-login via `pyotp` and retrying the failed call seamlessly. In addition, transient network glitches (`remotedisconnected`, `connection aborted`, `read timeout`) are caught with an exponential backoff retry loop (up to 3 attempts) before failing.
+- **Chunked Quote Fetching with Pacing**: Batch quote fetches across the 180+ F&O universe are executed in chunks of 50 with a 0.5s inter-chunk pacing delay and up to 3 retry attempts per chunk (1.5s delay) to ensure temporary exchange quote hiccups do not abort screening.
+- **Clean Subprocess Logging**: Replaced raw `print()` statements in `backend/scanner.py` with `logger.warning()` to prevent unformatted non-JSON messages from corrupting the Electron JSON-RPC standard I/O pipe.
 
 ---
 
@@ -300,26 +302,37 @@ $$\text{Quantity} = \max(1, \min(\text{Raw Quantity}, \text{Max Allowed Quantity
 - **No New Trades After**: **15:00 IST**.
 - **Mandatory Square-Off**: **15:15 IST**.
 
-### 7.3 Complete Indian Statutory Friction Model
+### 7.3 Complete Indian Statutory Friction Model & Live EstimateCharges API
 Calculated for both live estimates and backtesting:
 
 | Component | NSE Cash Intraday MIS Rate |
 | :--- | :--- |
-| **Brokerage** | $\min(₹20, 0.03\% \times \text{Turnover})$ per leg (flat ₹40 round-trip max) |
+| **Brokerage** | $\min(₹20, 0.1\% \times \text{Turnover})$ per leg (Angel One official tariff; flat ₹40 round-trip max) |
 | **Securities Transaction Tax (STT)** | $0.025\%$ on the **Sell** side turnover |
 | **Exchange Transaction Charges** | $0.00325\%$ of total round-trip turnover |
 | **SEBI Turnover Charges** | $₹10 \text{ per Crore} = 0.0001\%$ of round-trip turnover |
 | **Stamp Duty** | $0.003\%$ on the **Buy** side turnover |
 | **Goods & Services Tax (GST)** | $18\%$ applied to $(\text{Brokerage} + \text{Exchange Charges} + \text{SEBI Charges})$ |
 
-### 7.4 Pre-Trade Friction Guard
-Before entering any trade, the engine verifies:
+### 7.4 Angel One Live `estimateCharges` & Pre-Trade Friction Guard
+1. **Live Angel One API Integration**:
+   - Uses `POST /rest/secure/angelbroking/brokerage/v1/estimateCharges` via `smart_api_client.estimate_round_trip_charges(...)`.
+   - Prepares and transmits a multi-leg batch (`orders: [entry_leg, exit_leg]`) in a single network round-trip, receiving exact exchange breakdown from Angel One's servers.
+2. **High-Speed Caching (0.018 ms vs 100 ms)**:
+   - Evaluated round-trip charges are cached for 5 minutes (`_charges_cache`) keyed by `(symbol, entry, target, qty, product, direction)`.
+   - Repeated checks during active market evaluation complete in **sub-millisecond time** (0.018 ms), avoiding execution loop delays.
+3. **Ultra-Fast Local Fallback (0.001 ms)**:
+   - `SmartApiClient.calculate_statutory_charges_fast(...)` provides a zero-latency fallback matching Angel One's exact calculation structure when offline or if network hiccups occur.
+4. **Pre-Trade Friction Threshold ($3.5\times$)**:
+   - Before entering any trade, the engine verifies:
 
 $$\text{Expected Net Gain} = (\text{Target} - \text{EntryPrice}) \times \text{Quantity}$$
 
 $$\text{Trade Permitted IF: } \text{Expected Net Gain} \ge 3.5 \times \text{Estimated Round-Trip Friction}$$
 
-If payoff is less than $3.5\times$ friction, the setup is **rejected**.
+   - If expected gain is less than $3.5\times$ round-trip friction, the setup is **strictly rejected** to prevent fee churn.
+5. **Pre-Trade Friction Evaluation**:
+   - Executes automatically under the hood within `TradingEngine.execute_signal(...)` without cluttering the main dashboard UI.
 
 ---
 

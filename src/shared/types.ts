@@ -433,6 +433,7 @@ export interface ElectronAPI {
     instruments: (exchange: string) => Promise<any>;
     search: (query: string) => Promise<any>;
     status: () => Promise<any>;
+    estimateCharges: (params: any) => Promise<any>;
   };
   ticker: {
     subscribe: (tokens: (number | string)[]) => Promise<any>;

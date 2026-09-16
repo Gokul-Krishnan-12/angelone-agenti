@@ -132,6 +132,36 @@ def test_trading_engine_hourly_dynamic_rescreening():
                     assert mock_scan.called
 
 
+def test_trading_engine_manual_scan_activity_logging():
+    """Verify that manual_scan generates activity logs with the shortlisted stocks."""
+    from backend.trading_engine import TradingEngine
+
+    engine = TradingEngine()
+    engine.active_trades["TATAMOTORS"] = {"sl": 900.0, "target": 950.0}
+
+    logs_emitted = []
+
+    def mock_push_log(msg, level="info"):
+        logs_emitted.append((msg, level))
+
+    with patch.object(engine, "_push_log", side_effect=mock_push_log):
+        with patch(
+            "backend.screener.screener_engine.generate_daily_watchlist",
+            return_value=["RELIANCE", "INFY", "TCS"],
+        ):
+            with patch("backend.scanner.scanner.scan_watchlist", return_value=[]):
+                signals = engine.manual_scan()
+                assert signals == []
+                # Watchlist should contain screened stocks + existing holdings
+                assert "RELIANCE" in engine.dynamic_watchlist
+                assert "TATAMOTORS" in engine.dynamic_watchlist
+                # Activity log must include the manual scan trigger and the shortlisted stocks
+                assert any("Manual Scan requested" in msg for msg, lvl in logs_emitted)
+                assert any("Dynamic Watchlist updated [Manual Scan]" in msg for msg, lvl in logs_emitted)
+                assert any("RELIANCE, INFY, TCS" in msg for msg, lvl in logs_emitted)
+                assert any("Manual scan complete" in msg for msg, lvl in logs_emitted)
+
+
 def test_kaufman_efficiency_ratio_trending_series():
     """Straight line trending series must yield KER == 1.0."""
     import numpy as np
