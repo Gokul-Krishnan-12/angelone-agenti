@@ -45,6 +45,9 @@ from ..strategies.keltner_breakout import KeltnerBreakoutStrategy
 from ..strategies.macd_cross import MACDCrossStrategy
 from ..strategies.mfi_exhaustion import MFIExhaustionStrategy
 from ..strategies.cpr_breakout_reversal import CPRBreakoutReversalStrategy
+from ..strategies.fixed_range_volume_profile import (
+    FixedRangeVolumeProfileStrategy,
+)
 from ..strategies.gap_fill import GapFillStrategy
 from ..strategies.liquidity_grab_reversal import LiquidityGrabReversalStrategy
 from ..strategies.opening_range_breakout import OpeningRangeBreakoutStrategy
@@ -88,6 +91,7 @@ ALL_STRATEGIES: Dict[str, Any] = {
     "opening_range_breakout": OpeningRangeBreakoutStrategy(),
     "liquidity_grab_reversal": LiquidityGrabReversalStrategy(),
     "gap_fill": GapFillStrategy(),
+    "fixed_range_volume_profile": FixedRangeVolumeProfileStrategy(),
 }
 
 # ── Statutory Indian Market Friction Calculator ──────────────────────────────
@@ -101,9 +105,13 @@ def compute_statutory_friction(
     sell_turnover = round(exit_price * qty, 2)
     total_turnover = round(buy_turnover + sell_turnover, 2)
 
-    brokerage = 40.0  # ₹20 buy + ₹20 sell
+    # Angel One Intraday: Lower of ₹20 or 0.1% per executed order (min ₹5)
+    buy_brokerage = max(5.0, min(20.0, round(buy_turnover * 0.001, 2)))
+    sell_brokerage = max(5.0, min(20.0, round(sell_turnover * 0.001, 2)))
+    brokerage = round(buy_brokerage + sell_brokerage, 2)
+
     stt = round(sell_turnover * 0.00025, 2)  # 0.025% on sell
-    exchange_fee = round(total_turnover * 0.0000325, 2)  # 0.00325%
+    exchange_fee = round(total_turnover * 0.0000297, 2)  # 0.00297% (SEBI True-to-Label NSE Cash Intraday)
     sebi_charge = round(total_turnover * 0.000001, 2)  # ₹10 / crore
     stamp_duty = round(buy_turnover * 0.00003, 2)  # 0.003% on buy
     gst = round((brokerage + exchange_fee + sebi_charge) * 0.18, 2)
@@ -146,6 +154,7 @@ def _apply_confluence(
     signals: List[Dict],
     direction: str,
     min_confluence: int = 3,
+    min_confluence_trending: int = 2,  # relaxed threshold in TRENDING_BULL/TRENDING_BEAR
     min_rr: float = 2.0,
     df: Optional[pd.DataFrame] = None,
     trend_aligned: bool = True,
@@ -174,13 +183,17 @@ def _apply_confluence(
         strat_id = sig.get("_strat_id", "")
         families_seen.add(_get_strategy_family(strat_id))
 
-    if len(families_seen) < min_confluence:
+    family_count = len(families_seen)
+    # Initial pass: if even the trending minimum isn't met, skip entirely
+    if family_count < min(min_confluence, min_confluence_trending):
         return None
 
     best = max(dir_signals, key=lambda s: s.get("confidence", 0))
 
     # Market Regime Filter: suppress false breakout churn during chop
+    # Also drives adaptive confluence: trending regimes allow relaxed 2-family threshold
     regime_meta = None
+    effective_min_confluence = min_confluence  # default (choppy / unknown)
     if regime_enabled and df is not None and len(df) >= 20:
         regime_result = classify_market_regime(
             df, min_adx=regime_min_adx, min_ker=regime_min_ker
@@ -198,10 +211,37 @@ def _apply_confluence(
             return None
         regime_meta = regime_result
 
+        # Adaptive confluence: in trending regimes, relax to min_confluence_trending
+        if regime_result.regime in ("TRENDING_BULL", "TRENDING_BEAR"):
+            effective_min_confluence = min(min_confluence, min_confluence_trending)
+
+    # Apply the (possibly regime-adjusted) confluence threshold
+    if family_count < effective_min_confluence:
+        return None
+
     best = dict(best)
     entry_p = float(best.get("entryPrice", best.get("price", 0.0)))
     sl_p = float(best.get("stopLoss", best.get("sl", 0.0)))
     raw_target = float(best.get("target", 0.0))
+
+    if df is not None and len(df) >= 5:
+        from ..strategy_engine import (
+            calculate_pullback_limit_entry,
+            calculate_volatility_buffered_sl,
+        )
+
+        pullback_entry = calculate_pullback_limit_entry(
+            df=df, direction=direction, breakout_level=entry_p
+        )
+        if pullback_entry > 0:
+            entry_p = pullback_entry
+            best["entryPrice"] = entry_p
+
+        buffered_sl = calculate_volatility_buffered_sl(
+            df=df, direction=direction, raw_sl=sl_p, lookback=10, atr_multiplier=0.5
+        )
+        if buffered_sl > 0:
+            sl_p = buffered_sl
 
     # Safe minimum stop-loss buffer & 1:2 R:R geometry
     if entry_p > 0 and sl_p > 0:
@@ -366,8 +406,8 @@ class BacktestEngine:
                 i += 1
                 continue  # position management handled inside trade loop below
 
-            # Run strategies on data up to (but not including) bar i
-            window = df.iloc[:i]
+            # Run strategies on recent rolling window up to bar i (150 bars is optimal for 50-EMA and TA indicators)
+            window = df.iloc[max(0, i - 150):i].copy()
             raw_signals = self._run_strategies(window, symbol)
 
             # Try BUY then SELL confluence gate

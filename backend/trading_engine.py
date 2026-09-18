@@ -32,12 +32,33 @@ class TradingEngine:
         self._instrument_map = {}  # cached symbol -> instrument_token map
         self._last_eod_summary_date = None
         self.dynamic_watchlist = []
-        self.screener_interval = 3600  # 1 hour periodic dynamic re-screening
+        self.screener_interval = 1800  # 30 min periodic dynamic re-screening
         self._last_screener_time = 0.0
         self._last_screener_date = None
         self._screener_slots_completed = set()
         self._screener_retry_due_at = 0.0
         self._screener_failed_slot = None
+        self._screener_lock = threading.Lock()
+        self._recent_logs: List[Dict[str, Any]] = []
+
+        # Autonomous screener daemon: runs every 30 mins during market hours even if live trade agent is idle
+        self._screener_thread = threading.Thread(
+            target=self._run_screener_scheduler, daemon=True
+        )
+        self._screener_thread.start()
+
+    def _run_screener_scheduler(self):
+        """Autonomous background scheduler that checks if dynamic screener is due, running between 09:30 and 14:30 IST."""
+        time.sleep(5)
+        while True:
+            try:
+                self.run_clock_screener()
+            except Exception as e:
+                logger.error("Error in screener background scheduler: %s", e)
+            time.sleep(15)
+
+
+
 
     def start(self, mode: str = "confirm"):
         if self.running:
@@ -74,17 +95,30 @@ class TradingEngine:
     def _push_log(self, message: str, level: str = "info"):
         log_fn = getattr(logger, level.lower(), logger.info)
         log_fn(message)
+        log_entry = {
+            "id": str(uuid.uuid4()),
+            "level": level,
+            "message": message,
+            "timestamp": datetime.datetime.now().isoformat(),
+        }
+        if not hasattr(self, "_recent_logs"):
+            self._recent_logs = []
+        self._recent_logs.insert(0, log_entry)
+        if len(self._recent_logs) > 300:
+            self._recent_logs = self._recent_logs[:300]
+
         event = {
             "event": "log:entry",
-            "data": {
-                "id": str(uuid.uuid4()),
-                "level": level,
-                "message": message,
-                "timestamp": datetime.datetime.now().isoformat(),
-            },
+            "data": log_entry,
         }
         print(json.dumps(event, cls=DateTimeEncoder))
         sys.stdout.flush()
+
+    def get_recent_logs(self) -> List[Dict[str, Any]]:
+        return list(getattr(self, "_recent_logs", []))
+
+    def clear_recent_logs(self):
+        self._recent_logs = []
 
     def _push_signal(self, signal: dict):
         event = {"event": "agent:signal", "data": signal}
@@ -155,6 +189,149 @@ class TradingEngine:
                 self._instrument_map[sym.replace("-EQ", "")] = tok
         return self._instrument_map
 
+    def run_clock_screener(self, force: bool = False, slot_label_override: Optional[str] = None) -> List[str]:
+        """Runs clock-aligned dynamic screener across F&O universe (09:30–14:30 IST)."""
+        screener_lock = getattr(self, "_screener_lock", None)
+        if screener_lock is not None and not screener_lock.acquire(blocking=False):
+            logger.info("Dynamic screener already running in another thread; returning current watchlist.")
+            return getattr(self, "dynamic_watchlist", [])
+
+        try:
+            now_dt = datetime.datetime.now()
+            today_date = now_dt.date()
+            now_time_str = now_dt.strftime("%H:%M")
+            now_ts = time.time()
+
+            from .market_hours import is_trading_day
+
+            # Requirement: Dynamic screening ONLY happens from 09:30 to 14:30 IST on trading days
+            if not force:
+                if not is_trading_day(today_date) or not ("09:30" <= now_time_str <= "14:30"):
+                    return getattr(self, "dynamic_watchlist", [])
+
+            SCREENER_SLOTS = [
+                "09:30", "10:00", "10:30", "11:00", "11:30",
+                "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"
+            ]
+            screener_due = force
+            slot_label = slot_label_override or ""
+            current_due_slot = None
+
+            if getattr(self, "_last_screener_date", None) != today_date:
+                self._screener_slots_completed = set()
+                self._last_screener_date = today_date
+                self._screener_retry_due_at = 0.0
+                self._screener_failed_slot = None
+                # Mark past slots so engine doesn't sequentially replay missed morning slots
+                for s in SCREENER_SLOTS:
+                    if now_time_str > s:
+                        self._screener_slots_completed.add(s)
+
+            if not screener_due:
+                if not getattr(self, "dynamic_watchlist", None):
+                    screener_due = True
+                    passed = [s for s in SCREENER_SLOTS if now_time_str >= s]
+                    if passed:
+                        current_due_slot = passed[-1]
+                        slot_label = f"{current_due_slot} IST"
+                        for s in passed:
+                            self._screener_slots_completed.add(s)
+                    else:
+                        current_due_slot = "09:30"
+                        slot_label = "09:30 IST"
+                else:
+                    for s in SCREENER_SLOTS:
+                        if now_time_str >= s and s not in self._screener_slots_completed:
+                            screener_due = True
+                            current_due_slot = s
+                            slot_label = f"{s} IST"
+                            break
+
+                    # Fallback for 30-min elapsed interval (or simulated test clocks)
+                    if not screener_due and (now_ts - getattr(self, "_last_screener_time", 0.0)) >= getattr(self, "screener_interval", 1800):
+                        screener_due = True
+                        passed = [s for s in SCREENER_SLOTS if now_time_str >= s]
+                        current_due_slot = passed[-1] if passed else "09:30"
+                        slot_label = f"{current_due_slot} IST"
+
+                    if not screener_due and getattr(self, "_screener_retry_due_at", 0.0) > 0:
+                        if now_ts >= self._screener_retry_due_at:
+                            screener_due = True
+                            current_due_slot = getattr(self, "_screener_failed_slot", "09:30")
+                            slot_label = f"{current_due_slot} IST"
+
+
+            if screener_due:
+                from .fno_universe import get_fno_universe
+                from .screener import screener_engine
+
+                custom_watchlist = config_manager.get_watchlist()
+                full_universe = list(set(get_fno_universe() + custom_watchlist))
+
+                try:
+                    screened_stocks = screener_engine.generate_daily_watchlist(
+                        universe=full_universe, limit=35
+                    )
+                except Exception as e:
+                    logger.error("Dynamic screener invocation failed: %s", e)
+                    screened_stocks = []
+
+                screener_ok = bool(screened_stocks) and getattr(screener_engine, "last_run_successful", True)
+                if screened_stocks:
+                    screener_ok = True
+                candidate_list = (
+                    list(screened_stocks) if screened_stocks else list(full_universe[:35])
+                )
+                combined_watchlist = list(candidate_list)
+                for sym in self.active_trades:
+                    if sym not in combined_watchlist:
+                        combined_watchlist.append(sym)
+
+                if screener_ok and screened_stocks:
+                    self.dynamic_watchlist = combined_watchlist
+                    self._last_screener_time = now_ts
+                    self._screener_retry_due_at = 0.0
+                    self._screener_failed_slot = None
+                    if current_due_slot:
+                        self._screener_slots_completed.add(current_due_slot)
+
+                    next_slot = self.get_next_screener_slot()
+                    effective_label = slot_label or f"{current_due_slot or now_time_str} IST"
+                    self._push_log(
+                        f"⏱️ 30-Min Scan [{effective_label}] complete. Next autonomous scan scheduled at: {next_slot}.",
+                        level="info",
+                    )
+                    try:
+                        ticker_manager.subscribe(self.dynamic_watchlist)
+                    except Exception:
+                        pass
+                else:
+                    if not getattr(self, "dynamic_watchlist", None):
+                        self.dynamic_watchlist = combined_watchlist
+                    self._screener_retry_due_at = now_ts + 300
+                    self._screener_failed_slot = current_due_slot
+        finally:
+            if screener_lock is not None:
+                try:
+                    screener_lock.release()
+                except RuntimeError:
+                    pass
+
+        return getattr(self, "dynamic_watchlist", [])
+
+    def get_next_screener_slot(self) -> str:
+        """Return the next upcoming 30-minute scan time between 09:30 and 14:30 IST."""
+        now_dt = datetime.datetime.now()
+        now_time_str = now_dt.strftime("%H:%M")
+        SCREENER_SLOTS = [
+            "09:30", "10:00", "10:30", "11:00", "11:30",
+            "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"
+        ]
+        upcoming = [s for s in SCREENER_SLOTS if s > now_time_str]
+        if upcoming:
+            return f"{upcoming[0]} IST"
+        return "Tomorrow 09:30 IST"
+
     def scan_and_trade(self):
         can_trade, reason = risk_manager.can_trade()
         if not can_trade:
@@ -167,115 +344,8 @@ class TradingEngine:
         else:
             self._notified_cannot_trade = False
 
-        # Clock-aligned Dynamic Screener: runs at 09:30 IST, then hourly (10:30, 11:30, 12:30, 13:30, 14:30 IST)
-        now_dt = datetime.datetime.now()
-        today_date = now_dt.date()
-        now_time_str = now_dt.strftime("%H:%M")
-        now_ts = time.time()
-
-        if getattr(self, "_last_screener_date", None) != today_date:
-            self._screener_slots_completed = set()
-            self._last_screener_date = today_date
-            self._screener_retry_due_at = 0.0
-            self._screener_failed_slot = None
-
-        SCREENER_SLOTS = ["09:30", "10:30", "11:30", "12:30", "13:30", "14:30"]
-        screener_due = False
-        slot_label = ""
-        current_due_slot = None
-
-        if not getattr(self, "dynamic_watchlist", None):
-            screener_due = True
-            passed = [s for s in SCREENER_SLOTS if now_time_str >= s]
-            if passed:
-                current_due_slot = passed[-1]
-                slot_label = f"Initial ({current_due_slot} IST)"
-                for s in passed:
-                    self._screener_slots_completed.add(s)
-            else:
-                current_due_slot = "09:30"
-                slot_label = "Initial (Pre-Market/Early)"
-        else:
-            for s in SCREENER_SLOTS:
-                if now_time_str >= s and s not in self._screener_slots_completed:
-                    screener_due = True
-                    current_due_slot = s
-                    slot_label = f"{s} IST"
-                    break
-
-            # Fallback for hourly elapsed interval (or simulated test clocks)
-            if not screener_due and (now_ts - getattr(self, "_last_screener_time", 0.0)) >= getattr(self, "screener_interval", 3600):
-                screener_due = True
-                passed = [s for s in SCREENER_SLOTS if now_time_str >= s]
-                current_due_slot = passed[-1] if passed else "Hourly"
-                slot_label = f"Hourly ({now_time_str} IST)"
-
-            if not screener_due and getattr(self, "_screener_retry_due_at", 0.0) > 0:
-                if now_ts >= self._screener_retry_due_at:
-                    screener_due = True
-                    current_due_slot = getattr(self, "_screener_failed_slot", "09:30")
-                    slot_label = f"Retry ({current_due_slot} IST)"
-
-        if screener_due:
-            from .fno_universe import get_fno_universe
-            from .screener import screener_engine
-
-            custom_watchlist = config_manager.get_watchlist()
-            full_universe = list(set(get_fno_universe() + custom_watchlist))
-
-            self._push_log(
-                f"Running dynamic momentum, RVOL & institutional participation screener [{slot_label}] across {len(full_universe)} F&O stocks..."
-            )
-            try:
-                screened_stocks = screener_engine.generate_daily_watchlist(
-                    universe=full_universe, limit=35
-                )
-            except Exception as e:
-                logger.error("Dynamic screener invocation failed: %s", e)
-                screened_stocks = []
-
-            screener_ok = getattr(screener_engine, "last_run_successful", True)
-
-            # Preserve any currently open active trades so position monitoring and trailing exits are never lost
-            candidate_list = (
-                list(screened_stocks) if screened_stocks else list(full_universe[:35])
-            )
-            combined_watchlist = list(candidate_list)
-            for sym in self.active_trades:
-                if sym not in combined_watchlist:
-                    combined_watchlist.append(sym)
-
-            if screener_ok and screened_stocks:
-                self.dynamic_watchlist = combined_watchlist
-                self._last_screener_time = now_ts
-                self._screener_retry_due_at = 0.0
-                self._screener_failed_slot = None
-                if current_due_slot:
-                    self._screener_slots_completed.add(current_due_slot)
-
-                top_preview = ", ".join(self.dynamic_watchlist[:10])
-                self._push_log(
-                    f"Dynamic Watchlist updated [{slot_label}]: Top {len(self.dynamic_watchlist)} in-play stocks selected: {top_preview}..."
-                )
-                try:
-                    ticker_manager.subscribe(self.dynamic_watchlist)
-                except Exception:
-                    pass
-            else:
-                # If screening failed or quotes could not be fetched, set fallback if first run
-                if not getattr(self, "dynamic_watchlist", None):
-                    self.dynamic_watchlist = combined_watchlist
-                    self._push_log(
-                        f"Dynamic screener quotes unavailable; initialized default watchlist ({len(self.dynamic_watchlist)} stocks).",
-                        level="warning",
-                    )
-                # Reschedule retry in 5 minutes (300s)
-                self._screener_retry_due_at = now_ts + 300
-                self._screener_failed_slot = current_due_slot
-                self._push_log(
-                    f"Dynamic screener [{slot_label}] encountered transient error or empty quotes. Will retry screening in 5 minutes.",
-                    level="warning",
-                )
+        # Clock-aligned Dynamic Screener
+        self.run_clock_screener()
 
         def handle_new_signal(signal):
             if signal["confidence"] >= 70:
@@ -305,7 +375,24 @@ class TradingEngine:
                             )
 
         # Scan stocks in parallel and stream signals to the UI instantly via handle_new_signal callback
-        scanner.scan_watchlist(self.dynamic_watchlist, on_signal=handle_new_signal)
+        signals = scanner.scan_watchlist(self.dynamic_watchlist, on_signal=handle_new_signal)
+        from .market_regime import get_current_market_regime
+        regime = get_current_market_regime()
+        if signals:
+            syms = ", ".join(f"{s['tradingsymbol']} ({s.get('direction', 'BUY')} {s.get('confidence', 0)}%)" for s in signals[:5])
+            self._push_log(
+                f"🎯 Multi-Strategy Scan Complete: {len(signals)} setup(s) cleared confluence gate ({syms}). Regime: {regime}.",
+                level="signal",
+            )
+        else:
+            now_t = time.time()
+            if now_t - getattr(self, "_last_scan_summary_time", 0.0) >= 300:
+                self._last_scan_summary_time = now_t
+                self._push_log(
+                    f"ℹ️ Multi-Strategy Scan Status: Evaluated {len(self.dynamic_watchlist)} stocks across 26 technical strategies. "
+                    f"0 setups met adaptive confluence gate (Regime: {regime}). Monitoring price action & key levels.",
+                    level="info",
+                )
 
         # Re-evaluate open positions for thesis invalidation
         if self.active_trades:
@@ -355,8 +442,31 @@ class TradingEngine:
             level="info",
         )
 
+        funnel = getattr(screener_engine, "last_funnel_stats", {})
+        if funnel:
+            self._push_log(
+                f"📊 Screener Funnel [Manual Scan]: Evaluated {funnel.get('total_universe', len(full_universe))} stocks → "
+                f"{funnel.get('passed_ker', 0)} passed KER ≥ 0.35, {funnel.get('passed_rvol', 0)} passed RVOL ≥ 1.8, "
+                f"{funnel.get('passed_turnover', 0)} passed Turnover ≥ ₹40Cr.",
+                level="info",
+            )
+        top_items = []
+        for sym in self.dynamic_watchlist[:5]:
+            st = screener_engine.get_stock_stats(sym)
+            if st:
+                top_items.append(
+                    f"{sym} [KER: {st.get('ker', 0.5):.2f}, RVOL: {st.get('rvol', 1.0):.1f}x, 20D Vol: ₹{st.get('turnover_cr', 0):.0f}Cr, Day: {st.get('change_pct', 0):+.1f}%, Score: {st.get('score', 0):.1f}]"
+                )
+            else:
+                top_items.append(sym)
+        if top_items:
+            self._push_log(
+                f"🔥 Top Shortlist Breakdown [Manual Scan]: " + " | ".join(top_items),
+                level="info",
+            )
+
         self._push_log(
-            f"Scanning shortlisted {len(self.dynamic_watchlist)} stocks across 25 technical strategies...",
+            f"Scanning shortlisted {len(self.dynamic_watchlist)} stocks across 26 technical strategies...",
             level="info",
         )
 
@@ -368,17 +478,25 @@ class TradingEngine:
             self.dynamic_watchlist, on_signal=handle_manual_signal
         )
 
+        from .market_regime import get_current_market_regime
+        regime = get_current_market_regime()
         if signals:
             syms = ", ".join(s["tradingsymbol"] for s in signals[:5])
             self._push_log(
-                f"Manual scan complete: {len(signals)} setup(s) identified ({syms}).",
+                f"Manual scan complete: {len(signals)} setup(s) identified ({syms}). Regime: {regime}.",
                 level="order",
             )
         else:
             self._push_log(
-                f"Manual scan complete: 0 trade setups met the 3-family confluence & R:R gate across {len(self.dynamic_watchlist)} stocks.",
+                f"Manual scan complete: 0 trade setups met the 3-family confluence & R:R gate across {len(self.dynamic_watchlist)} stocks under {regime} regime.",
                 level="info",
             )
+
+        next_slot = self.get_next_screener_slot()
+        self._push_log(
+            f"⏱️ Next autonomous 30-min scan scheduled at: {next_slot}.",
+            level="info",
+        )
 
         return signals or []
 
@@ -443,32 +561,69 @@ class TradingEngine:
         transaction_type = "BUY" if direction == "BUY" else "SELL"
 
         try:
+            risk_cfg = config_manager.get_risk_config()
+            scale_in_enabled = bool(risk_cfg.get("scaleInEnabled", True))
+            leg1_ratio = float(risk_cfg.get("scaleInLeg1Ratio", 0.5))
+            partial_enabled = bool(risk_cfg.get("partialBookingEnabled", True))
+            target1_rr = float(risk_cfg.get("partialBookingTargetRR", 1.2))
+            risk_dist = abs(entry_price - stop_loss)
+
+            # ── 2-Leg Scale-In: Leg 1 qty calculation ─────────────────────
+            if scale_in_enabled and qty >= 2:
+                leg1_qty = max(1, int(qty * leg1_ratio))
+                leg2_qty = qty - leg1_qty
+                order_qty = leg1_qty
+                scale_in_pending = True
+                # Compute Leg 2 pullback price from cached candles (EMA20/VWAP)
+                try:
+                    token = self._ensure_instrument_map().get(tradingsymbol)
+                    if token and token in scanner.candle_cache:
+                        from .strategy_engine import calculate_pullback_limit_entry
+                        leg2_price = calculate_pullback_limit_entry(
+                            df=scanner.candle_cache[token],
+                            direction=direction,
+                            breakout_level=None,  # no breakout ref — use EMA20/VWAP only
+                        )
+                    else:
+                        leg2_price = 0.0
+                except Exception:
+                    leg2_price = 0.0
+            else:
+                order_qty = qty
+                leg1_qty = qty
+                leg2_qty = 0
+                scale_in_pending = False
+                leg2_price = 0.0
+
             order_id = smart_api_client.place_order(
                 variety="NORMAL",
                 exchange=exchange,
                 tradingsymbol=tradingsymbol,
                 transaction_type=transaction_type,
-                quantity=qty,
+                quantity=order_qty,
                 product="INTRADAY",
                 order_type="LIMIT",
                 price=entry_price,
             )
-            self._push_log(
-                f"Executed {transaction_type} for {tradingsymbol}, qty {qty}, order_id {order_id}"
-            )
+
+            if scale_in_pending:
+                self._push_log(
+                    f"Scale-In Leg 1: {transaction_type} {order_qty}/{qty} shares of {tradingsymbol} "
+                    f"@ ₹{entry_price:.2f} (Leg 2: {leg2_qty} shares @ pullback ₹{leg2_price:.2f}). "
+                    f"Order ID: {order_id}",
+                    level="info",
+                )
+            else:
+                self._push_log(
+                    f"Executed {transaction_type} for {tradingsymbol}, qty {order_qty}, order_id {order_id}"
+                )
+
             risk_manager.increment_trade()
-            # Check if setup has asymmetric high R:R for multi-target partial booking
-            risk_dist = abs(entry_price - stop_loss)
-            reward_dist = abs(target - entry_price)
-            rr_ratio = reward_dist / risk_dist if risk_dist > 0 else 0.0
 
-            risk_cfg = config_manager.get_risk_config()
-            partial_enabled = bool(risk_cfg.get("partialBookingEnabled", True))
-            target1_rr = float(risk_cfg.get("partialBookingTargetRR", 2.0))
-
+            # Compute Target 1 for partial booking (based on full position risk_dist)
             target1 = target
             target2 = target
-            if partial_enabled and rr_ratio > 2.2 and risk_dist > 0:
+            if partial_enabled and risk_dist > 0:
                 if direction == "BUY":
                     target1 = round(entry_price + (risk_dist * target1_rr), 2)
                 else:
@@ -479,7 +634,8 @@ class TradingEngine:
                 "tradingsymbol": tradingsymbol,
                 "exchange": exchange,
                 "direction": direction,
-                "quantity": qty,
+                "quantity": order_qty,
+                "total_planned_qty": qty,  # full position size (both legs combined)
                 "entry_price": entry_price,
                 "stop_loss": stop_loss,
                 "target": target,
@@ -488,6 +644,10 @@ class TradingEngine:
                 "original_strategy": signal.get("strategy", "unknown"),
                 "atr": signal.get("indicators", {}).get("atr", 0.0),
                 "submitted_at": time.time(),
+                # Scale-in metadata
+                "scale_in_pending": scale_in_pending,
+                "scale_in_leg2_qty": leg2_qty,
+                "scale_in_leg2_price": leg2_price,
             }
             return True
         except Exception as e:
@@ -538,6 +698,8 @@ class TradingEngine:
             return
 
         try:
+            risk_cfg = config_manager.get_risk_config()
+            timeout_secs = int(risk_cfg.get("pendingOrderTimeoutSeconds", 15))
             orders = smart_api_client.get_orders(force=True)
             order_map = {str(o.get("orderId")): o for o in orders if o.get("orderId")}
             now = time.time()
@@ -559,11 +721,34 @@ class TradingEngine:
                     sl = pending["stop_loss"]
                     target = pending["target"]
 
+                    # ── Scale-In Leg 2 fill: weighted average entry update ──
+                    if pending.get("is_scale_in_leg2"):
+                        leg1_sym = symbol
+                        if leg1_sym in self.active_trades:
+                            trade = self.active_trades[leg1_sym]
+                            leg1_qty = int(trade.get("leg1_qty", trade["initial_quantity"]))
+                            leg1_price = float(trade.get("leg1_fill_price", trade["entry_price"]))
+                            total_qty = leg1_qty + fill_qty
+                            avg_entry = round(
+                                (leg1_price * leg1_qty + fill_price * fill_qty) / total_qty, 2
+                            )
+                            trade["entry_price"] = avg_entry
+                            trade["initial_quantity"] = total_qty
+                            trade["scale_in_done"] = True
+                            config_manager.save_active_trades(self.active_trades)
+                            self._push_log(
+                                f"Scale-In Leg 2 FILLED for {symbol}: {fill_qty} shares @ ₹{fill_price:.2f}. "
+                                f"Avg Entry updated to ₹{avg_entry:.2f} ({total_qty} total shares).",
+                                level="info",
+                            )
+                        to_remove.append(order_id)
+                        continue  # skip normal promote-to-active-trades logic
+
                     self._push_log(
                         f"Entry order {order_id} FILLED for {symbol}: {fill_qty} shares @ ₹{fill_price:.2f}"
                     )
 
-                    # Place native exchange-side Stop Loss
+                    # Place native exchange-side Stop Loss (covers full risk from Leg 1)
                     sl_order_id = self._place_exchange_stop_loss(
                         symbol=symbol,
                         exchange=pending["exchange"],
@@ -588,12 +773,79 @@ class TradingEngine:
                         "atr": pending["atr"],
                         "high_water_mark": fill_price,
                         "low_water_mark": fill_price,
+                        # Scale-in tracking
+                        "leg1_qty": fill_qty,
+                        "leg1_fill_price": fill_price,
+                        "scale_in_done": False,
                     }
                     config_manager.save_active_trades(self.active_trades)
                     try:
                         ticker_manager.subscribe([symbol])
                     except Exception:
                         pass
+
+                    # ── Scale-In: place Leg 2 at pullback if applicable ────────
+                    if pending.get("scale_in_pending") and pending.get("scale_in_leg2_qty", 0) > 0:
+                        leg2_qty = int(pending["scale_in_leg2_qty"])
+                        leg2_price = float(pending.get("scale_in_leg2_price", 0.0))
+                        # Recompute leg2_price if not cached (fresh candle fallback)
+                        if leg2_price <= 0:
+                            try:
+                                token = self._ensure_instrument_map().get(symbol)
+                                if token and token in scanner.candle_cache:
+                                    from .strategy_engine import calculate_pullback_limit_entry
+                                    leg2_price = calculate_pullback_limit_entry(
+                                        df=scanner.candle_cache[token],
+                                        direction=direction,
+                                        breakout_level=None,
+                                    )
+                            except Exception:
+                                leg2_price = 0.0
+
+                        if leg2_price > 0:
+                            try:
+                                leg2_timeout = int(
+                                    risk_cfg.get("pendingOrderTimeoutSeconds", 15)
+                                ) * int(risk_cfg.get("scaleInLeg2TimeoutMultiplier", 2))
+                                leg2_tx = "BUY" if direction == "BUY" else "SELL"
+                                leg2_order_id = smart_api_client.place_order(
+                                    variety="NORMAL",
+                                    exchange=pending["exchange"],
+                                    tradingsymbol=symbol,
+                                    transaction_type=leg2_tx,
+                                    quantity=leg2_qty,
+                                    product="INTRADAY",
+                                    order_type="LIMIT",
+                                    price=leg2_price,
+                                )
+                                self.pending_orders[str(leg2_order_id)] = {
+                                    "order_id": str(leg2_order_id),
+                                    "tradingsymbol": symbol,
+                                    "exchange": pending["exchange"],
+                                    "direction": direction,
+                                    "quantity": leg2_qty,
+                                    "entry_price": leg2_price,
+                                    "stop_loss": sl,
+                                    "target": target,
+                                    "target1": pending.get("target1", target),
+                                    "target2": pending.get("target2", target),
+                                    "original_strategy": pending["original_strategy"],
+                                    "atr": pending["atr"],
+                                    "submitted_at": time.time(),
+                                    "is_scale_in_leg2": True,
+                                    "_leg2_timeout": leg2_timeout,
+                                }
+                                self._push_log(
+                                    f"Scale-In Leg 2 queued for {symbol}: {leg2_qty} shares "
+                                    f"@ ₹{leg2_price:.2f} LIMIT (timeout: {leg2_timeout}s).",
+                                    level="info",
+                                )
+                            except Exception as e2:
+                                self._push_log(
+                                    f"Scale-In Leg 2 order failed for {symbol}: {e2}. Leg 1 trade active.",
+                                    level="warning",
+                                )
+
                     to_remove.append(order_id)
 
                 elif status in ("CANCELLED", "REJECTED"):
@@ -608,10 +860,14 @@ class TradingEngine:
                     )
                     to_remove.append(order_id)
 
-                elif (now - pending.get("submitted_at", now)) > 60:
-                    # Timeout after 60 seconds of sitting unfilled in order book
+                elif (now - pending.get("submitted_at", now)) > (
+                    pending.get("_leg2_timeout", timeout_secs) if pending.get("is_scale_in_leg2") else timeout_secs
+                ):
+                    # Timeout: Leg 2 uses 2x timeout multiplier; Leg 1 uses normal timeout
+                    is_leg2 = pending.get("is_scale_in_leg2", False)
                     self._push_log(
-                        f"Entry order {order_id} for {symbol} timed out (60s unfilled). Cancelling.",
+                        f"{'Scale-In Leg 2' if is_leg2 else 'Entry'} order {order_id} for {symbol} "
+                        f"timed out. {'Leg 1 position continues.' if is_leg2 else 'Cancelling.'}",
                         level="warning",
                     )
                     try:
@@ -753,111 +1009,109 @@ class TradingEngine:
                         if (
                             partial_enabled
                             and not trade.get("partial_booked", False)
-                            and trade.get("target1")
-                            and trade.get("target1") != trade.get("target2")
                             and current_qty >= 2
                         ):
-                            hit_target1 = False
-                            if trade["direction"] == "BUY":
-                                if ltp >= trade["target1"]:
-                                    hit_target1 = True
-                            else:
-                                if ltp <= trade["target1"]:
-                                    hit_target1 = True
+                            from .watchdog import watchdog
+                            from .order_manager import order_manager
 
-                            if hit_target1:
-                                ratio = float(
-                                    risk_config.get("partialBookingRatio", 0.5)
-                                )
-                                exit_qty = max(1, int(current_qty * ratio))
-                                min_profit = float(
-                                    risk_config.get("partialBookingMinProfit", 250.0)
-                                )
-                                expected_gain = (
-                                    abs(ltp - trade["entry_price"]) * exit_qty
+                            t1_eval = watchdog.evaluate_exit_curve(
+                                trade=trade,
+                                ltp=ltp,
+                                current_qty=current_qty,
+                                exchange=p.get("exchange", "NSE"),
+                                product_type=p.get("product", "INTRADAY"),
+                                target1_r_mult=float(risk_config.get("partialBookingTargetRR", 1.2)),
+                            )
+
+                            if t1_eval.get("trigger_t1"):
+                                exit_qty = t1_eval["t1_exit_qty"]
+                                be_sl = t1_eval["breakeven_sl"]
+                                tx_type = "SELL" if p["quantity"] > 0 else "BUY"
+
+                                smart_api_client.place_order(
+                                    variety="NORMAL",
+                                    exchange=p["exchange"],
+                                    tradingsymbol=symbol,
+                                    transaction_type=tx_type,
+                                    quantity=exit_qty,
+                                    product=p.get("product", "INTRADAY"),
+                                    order_type="LIMIT",
+                                    price=self._get_exit_limit_price(ltp, tx_type),
                                 )
 
-                                # Brokerage safeguard: only split if expected gain justifies extra order fee
-                                if (
-                                    expected_gain >= min_profit
-                                    and (current_qty - exit_qty) >= 1
-                                ):
-                                    tx_type = "SELL" if p["quantity"] > 0 else "BUY"
-                                    smart_api_client.place_order(
-                                        variety="NORMAL",
+                                remaining_qty = current_qty - exit_qty
+                                trade["sl"] = be_sl
+                                trade["partial_booked"] = True
+                                trade["target"] = trade.get("target2", trade["target"])
+
+                                self._push_log(t1_eval.get("message", f"Target 1 booked for {symbol}"))
+
+                                # Atomic Stop-Loss Ratchet via OrderManager
+                                old_sl_id = trade.get("sl_order_id")
+                                if old_sl_id and remaining_qty > 0:
+                                    mod_res = order_manager.atomic_modify_stop_loss(
+                                        order_id=old_sl_id,
+                                        symbol=symbol,
                                         exchange=p["exchange"],
-                                        tradingsymbol=symbol,
-                                        transaction_type=tx_type,
-                                        quantity=exit_qty,
-                                        product=p.get("product", "INTRADAY"),
-                                        order_type="LIMIT",
-                                        price=self._get_exit_limit_price(ltp, tx_type),
+                                        direction=trade["direction"],
+                                        quantity=remaining_qty,
+                                        trigger_price=be_sl,
+                                        variety="STOPLOSS",
+                                        product_type=p.get("product", "INTRADAY"),
                                     )
-
-                                    # Cancel old SL order on full quantity
-                                    old_sl_id = trade.get("sl_order_id")
-                                    if old_sl_id:
-                                        try:
-                                            smart_api_client.cancel_order(
-                                                variety="STOPLOSS", order_id=old_sl_id
-                                            )
-                                        except Exception:
-                                            pass
-
-                                    # Move SL to Breakeven on remaining runner shares
-                                    remaining_qty = current_qty - exit_qty
-                                    old_sl = trade["sl"]
-                                    trade["sl"] = trade["entry_price"]
-                                    trade["partial_booked"] = True
-                                    trade["target"] = trade.get(
-                                        "target2", trade["target"]
-                                    )
-
-                                    # Place new exchange SL at breakeven for remaining shares
-                                    if remaining_qty > 0:
-                                        trade["sl_order_id"] = (
-                                            self._place_exchange_stop_loss(
-                                                symbol=symbol,
-                                                exchange=p["exchange"],
-                                                direction=trade["direction"],
-                                                quantity=remaining_qty,
-                                                stop_loss=trade["entry_price"],
-                                            )
+                                    if mod_res["success"]:
+                                        self._push_log(
+                                            f"Atomically modified exchange SL {old_sl_id} for {symbol} "
+                                            f"to Breakeven+Friction @ ₹{be_sl:.2f} (qty: {remaining_qty})."
                                         )
-                                    config_manager.save_active_trades(
-                                        self.active_trades
-                                    )
-
-                                    self._push_log(
-                                        f"🎯 PARTIAL TARGET 1 HIT for {symbol}: Booked {exit_qty} shares at ₹{ltp:.2f} "
-                                        f"(+₹{expected_gain:.2f}). Moved SL from ₹{old_sl:.2f} to Breakeven @ ₹{trade['entry_price']:.2f}. "
-                                        f"{remaining_qty} runner shares targeting ₹{trade['target']:.2f}."
-                                    )
-
-                                    try:
-                                        notifier.notify_trade_exit(
-                                            {
-                                                "tradingsymbol": symbol,
-                                                "direction": trade.get(
-                                                    "direction", "BUY"
-                                                ),
-                                                "entryPrice": trade["entry_price"],
-                                                "exitPrice": ltp,
-                                                "quantity": exit_qty,
-                                                "pnl": round(expected_gain, 2),
-                                                "pnlPercent": round(
-                                                    abs(ltp - trade["entry_price"])
-                                                    / trade["entry_price"]
-                                                    * 100,
-                                                    2,
-                                                ),
-                                                "exitReason": "PARTIAL_TARGET",
-                                                "mode": f"Live Trading ({self.mode.capitalize()})",
-                                            }
+                                    elif mod_res.get("emergency_exit_required"):
+                                        # Emergency market close to eliminate unhedged exposure
+                                        self._push_log(
+                                            f"CRITICAL: Atomic SL modification failed for {symbol}. "
+                                            f"Triggering emergency market close for {remaining_qty} shares to eliminate unhedged exposure.",
+                                            level="warning",
                                         )
-                                    except Exception:
-                                        pass
-                                    continue
+                                        order_manager.emergency_market_close(
+                                            symbol=symbol,
+                                            exchange=p["exchange"],
+                                            quantity=remaining_qty,
+                                            direction=trade["direction"],
+                                            product=p.get("product", "INTRADAY"),
+                                        )
+                                        self.active_trades.pop(symbol, None)
+                                        config_manager.save_active_trades(self.active_trades)
+                                        continue
+
+                                config_manager.save_active_trades(self.active_trades)
+                                expected_gain = abs(ltp - trade["entry_price"]) * exit_qty
+                                self._push_log(
+                                    f"🎯 PARTIAL TARGET 1 HIT for {symbol}: Booked {exit_qty} shares at ₹{ltp:.2f} "
+                                    f"(+₹{expected_gain:.2f}). Moved SL to Breakeven+Friction @ ₹{be_sl:.2f}. "
+                                    f"{remaining_qty} runner shares targeting ₹{trade['target']:.2f}."
+                                )
+
+                                try:
+                                    notifier.notify_trade_exit(
+                                        {
+                                            "tradingsymbol": symbol,
+                                            "direction": trade.get("direction", "BUY"),
+                                            "entryPrice": trade["entry_price"],
+                                            "exitPrice": ltp,
+                                            "quantity": exit_qty,
+                                            "pnl": round(expected_gain, 2),
+                                            "pnlPercent": round(
+                                                abs(ltp - trade["entry_price"])
+                                                / trade["entry_price"]
+                                                * 100,
+                                                2,
+                                            ),
+                                            "exitReason": "PARTIAL_TARGET",
+                                            "mode": f"Live Trading ({self.mode.capitalize()})",
+                                        }
+                                    )
+                                except Exception:
+                                    pass
+                                continue
 
                         hit_sl = False
                         hit_target = False
@@ -1025,7 +1279,7 @@ class TradingEngine:
 
         risk_config = config_manager.get_risk_config()
         weak_exit_mins = risk_config.get("positionRevalWeakExitMins", 15)
-        breakeven_mins = risk_config.get("positionRevalBreakevenMins", 45)
+        breakeven_mins = risk_config.get("positionRevalBreakevenMins", 20)
         instrument_map = self._ensure_instrument_map()
         now = datetime.datetime.now()
 
@@ -1101,7 +1355,23 @@ class TradingEngine:
                     self._exit_position(pos, symbol, reason)
                 continue
 
-            # Rule 3: Time decay — tighten to breakeven
+            # Rule 3: Idle Trade Circuit Breaker (held >= 20 mins without +0.5R)
+            from .watchdog import watchdog
+
+            idle_exit, idle_reason = watchdog.check_idle_trade_circuit_breaker(
+                trade=trade,
+                ltp=ltp,
+                mins_held=mins_held,
+                stagnation_timeout_mins=float(breakeven_mins),
+                min_required_r=0.5,
+            )
+            if idle_exit:
+                self._push_log(idle_reason, level="warning")
+                if self.mode == "auto":
+                    self._exit_position(pos, symbol, idle_reason)
+                continue
+
+            # Rule 3b: Time decay — tighten to breakeven if held >= breakeven_mins
             if mins_held >= breakeven_mins:
                 if entry_price > 0 and trade["sl"] != entry_price:
                     old_sl = trade["sl"]
@@ -1118,7 +1388,7 @@ class TradingEngine:
                 )
 
     def _tighten_to_breakeven(self, symbol: str):
-        """Move the stop-loss to the entry price (breakeven)."""
+        """Move the stop-loss to the entry price (breakeven) atomically."""
         if symbol in self.active_trades:
             trade = self.active_trades[symbol]
             entry_price = trade.get("entry_price", 0)
@@ -1126,24 +1396,21 @@ class TradingEngine:
                 trade["sl"] = entry_price
                 sl_id = trade.get("sl_order_id")
                 if sl_id:
-                    tx_type = "SELL" if trade["direction"] == "BUY" else "BUY"
-                    lim_p = (
-                        round(entry_price * 0.99, 2)
-                        if tx_type == "SELL"
-                        else round(entry_price * 1.01, 2)
+                    from .order_manager import order_manager
+
+                    qty = int(trade.get("initial_quantity", 1))
+                    mod_res = order_manager.atomic_modify_stop_loss(
+                        order_id=sl_id,
+                        symbol=symbol,
+                        exchange=trade.get("exchange", "NSE"),
+                        direction=trade["direction"],
+                        quantity=qty,
+                        trigger_price=entry_price,
+                        variety="STOPLOSS",
                     )
-                    try:
-                        smart_api_client.modify_order(
-                            variety="STOPLOSS",
-                            order_id=sl_id,
-                            tradingsymbol=symbol,
-                            order_type="STOPLOSS_LIMIT",
-                            price=lim_p,
-                            trigger_price=entry_price,
-                        )
-                    except Exception as e:
+                    if not mod_res["success"]:
                         self._push_log(
-                            f"Error modifying exchange SL order {sl_id} to breakeven: {e}",
+                            f"Error modifying exchange SL order {sl_id} to breakeven: {mod_res.get('message')}",
                             level="warning",
                         )
                 config_manager.save_active_trades(self.active_trades)

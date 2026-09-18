@@ -43,7 +43,7 @@ This repository is an **agentic intraday algorithmic trading desktop application
 │              (uv-managed Python 3.9 - 3.12)            │
 │  ┌──────────────────┐ ┌─────────────────┐ ┌─────────┐  │
 │  │  Trading Engine  │ │ Confluence Gate │ │ Screener│  │
-│  │ (Fast/Slow Loop) │ │  (25 Strategies)│ │  (KER)  │  │
+│  │ (Fast/Slow Loop) │ │  (26 Strategies)│ │  (KER)  │  │
 │  └────────┬─────────┘ └────────┬────────┘ └────┬────┘  │
 │           │                    │               │       │
 │  ┌────────▼────────────────────▼───────────────▼─────┐  │
@@ -59,7 +59,7 @@ This repository is an **agentic intraday algorithmic trading desktop application
 ### Core Characteristics:
 - **Headless 2FA Session Creation**: Automatically generates time-based TOTP passwords using `pyotp` from user-configured secrets, eliminating browser redirect requirements.
 - **Local Persistence & Encryption**: User credentials, active positions, and custom configurations are encrypted using `cryptography.fernet` (AES-128-CBC with HMAC-SHA256) and saved in `~/.smartapi-agentic-trading/config.json`.
-- **Pre-Trade Mathematical Edge**: Every signal must clear a **3-Family Confluence Gate**, a **50-EMA Trend Alignment Gate**, a **Market Regime Filter**, and a **1:2 Risk-Reward Target Geometry**.
+- **Pre-Trade Mathematical Edge**: Every signal must clear an **Adaptive Confluence Gate** (≥ 3 families in CHOPPY_RANGE, ≥ 2 families in TRENDING_BULL/TRENDING_BEAR), a **50-EMA Trend Alignment Gate**, a **Market Regime Filter**, and a **1:2 Risk-Reward Target Geometry**.
 - **Pre-Trade Friction Defense**: Models complete Indian statutory exchange charges (Brokerage, STT, Exchange Turnover, Stamp Duty, SEBI, GST). Automatically blocks trades where expected payoff $< 3.5\times$ regulatory friction.
 - **Fail-Safe Trade Execution**: Live entries use `LIMIT` orders; positions are immediately protected with native exchange `STOPLOSS_LIMIT` orders on Angel One servers to prevent catastrophic slippage if the desktop app disconnects.
 
@@ -74,7 +74,7 @@ This repository is an **agentic intraday algorithmic trading desktop application
 | [backend/smartapi_client.py](file:///home/gokul/Desktop/angelone-agenti/backend/smartapi_client.py) | Singleton `SmartApiClient` wrapping `smartapi-python`. Handles headless TOTP login, session renewal, order placement/modification/cancellation, rate limiting, and historical data fetching. |
 | [backend/trading_engine.py](file:///home/gokul/Desktop/angelone-agenti/backend/trading_engine.py) | Master trading engine orchestrator. Manages the dual-loop execution, order timeouts, native exchange SLs, partial profit booking, ATR trailing SLs, thesis invalidation, and EOD square-off. |
 | [backend/risk_manager.py](file:///home/gokul/Desktop/angelone-agenti/backend/risk_manager.py) | Singleton `RiskManager`. Enforces 1R position sizing, daily loss caps (₹800), daily trade count caps (8 trades/day), market hours gating, and ATR trailing SL logic. |
-| [backend/scanner.py](file:///home/gokul/Desktop/angelone-agenti/backend/scanner.py) | Multi-strategy scanner. Coordinates all 25 strategies, groups votes by signal family, applies confluence, trend alignment (50 EMA), regime, and 1:2 R:R geometry gates. |
+| [backend/scanner.py](file:///home/gokul/Desktop/angelone-agenti/backend/scanner.py) | Multi-strategy scanner. Coordinates all 26 strategies, groups votes by signal family, applies confluence, trend alignment (50 EMA), regime, and 1:2 R:R geometry gates. |
 | [backend/screener.py](file:///home/gokul/Desktop/angelone-agenti/backend/screener.py) | Dynamic macro universe screener. Evaluates Kaufman Efficiency Ratio (KER $\ge 0.28$), 20-day turnover ($\ge ₹40\text{ Cr}$), ATR% ($\ge 1.5\%$), and morning RVOL ($\ge 1.8$). |
 | [backend/market_regime.py](file:///home/gokul/Desktop/angelone-agenti/backend/market_regime.py) | Quantitative market regime classifier (`TRENDING_BULL`, `TRENDING_BEAR`, `CHOPPY_RANGE`, `VOLATILE_EXPANSION`) using ADX, KER, 50 EMA, and Bollinger Band squeeze width. |
 | [backend/market_hours.py](file:///home/gokul/Desktop/angelone-agenti/backend/market_hours.py) | Indian exchange market hours validator (09:15–15:30 IST), intraday cutoff detector (15:00/15:15 IST), and dynamic exchange trading holiday fetcher with disk cache. |
@@ -85,7 +85,7 @@ This repository is an **agentic intraday algorithmic trading desktop application
 | [backend/fno_universe.py](file:///home/gokul/Desktop/angelone-agenti/backend/fno_universe.py) | List of 180+ liquid NSE F&O equities with SmartAPI token mappings. |
 | [backend/nifty_universe.py](file:///home/gokul/Desktop/angelone-agenti/backend/nifty_universe.py) | Standard NIFTY 50 universe definition. |
 | [backend/swing_screener.py](file:///home/gokul/Desktop/angelone-agenti/backend/swing_screener.py) | Daily multi-timeframe swing trading screener. |
-| [backend/strategies/](file:///home/gokul/Desktop/angelone-agenti/backend/strategies/) | All 25 individual technical strategy classes implementing [BaseStrategy](file:///home/gokul/Desktop/angelone-agenti/backend/strategies/base.py). |
+| [backend/strategies/](file:///home/gokul/Desktop/angelone-agenti/backend/strategies/) | All 26 individual technical strategy classes implementing [BaseStrategy](file:///home/gokul/Desktop/angelone-agenti/backend/strategies/base.py) (including Fixed Range Volume Profile / POC). |
 | [backend/backtest/](file:///home/gokul/Desktop/angelone-agenti/backend/backtest/) | Walk-forward backtesting suite with statutory Indian friction modeling, Yahoo Finance data caching, and Markdown reporting. |
 | [backend/tests/](file:///home/gokul/Desktop/angelone-agenti/backend/tests/) | Pure offline pytest suite (330+ unit tests) using synthetic candle fixtures. |
 | [src/main/](file:///home/gokul/Desktop/angelone-agenti/src/main/) | Electron main process: [python-bridge.ts](file:///home/gokul/Desktop/angelone-agenti/src/main/python-bridge.ts), [ipc-handlers.ts](file:///home/gokul/Desktop/angelone-agenti/src/main/ipc-handlers.ts), [preload.ts](file:///home/gokul/Desktop/angelone-agenti/src/main/preload.ts). |
@@ -121,7 +121,10 @@ The core engine is encapsulated in [backend/trading_engine.py](file:///home/goku
    - Cleans up positions manually closed on the Angel One mobile app.
 2. **Slow Loop (Every 60 seconds)**:
    - Scans the market for new entry setups (`scan_and_trade`).
-   - Clock-aligned dynamic re-screening across the F&O universe (`screener_engine.generate_daily_watchlist`): runs on initial engine startup and at scheduled market intervals (**09:30, 10:30, 11:30, 12:30, 13:30, 14:30 IST**). If a scheduled re-screen encounters transient network/quote timeouts, the engine automatically reschedules a 5-minute retry backoff (`_screener_retry_due_at = now_ts + 300`) while strictly preserving all active open trades in the dynamic watchlist.
+   - Clock-aligned dynamic re-screening across the F&O universe (`screener_engine.generate_daily_watchlist`): runs strictly on trading weekdays between **09:30 and 14:30 IST** at scheduled 30-minute intervals (**09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00, 13:30, 14:00, 14:30 IST**). Outside this window, scans do not execute. Every 30-minute scan emits strictly a single clean status message in the Activity Log:
+     - `⏱️ 30-Min Scan [HH:MM IST] complete. Next autonomous scan scheduled at: HH:MM IST.`
+     - If a scheduled re-screen encounters transient network/quote timeouts, the engine automatically reschedules a 5-minute retry backoff (`_screener_retry_due_at = now_ts + 300`) while strictly preserving all active open trades in the dynamic watchlist.
+
    - Re-evaluates open positions for **Thesis Invalidation**.
 
 ### 4.2 Execution Modes
@@ -129,7 +132,7 @@ The core engine is encapsulated in [backend/trading_engine.py](file:///home/goku
 - **`auto` Mode**: Autonomously executes trades when:
   1. Market hours check passes (`risk_manager.can_trade() == True`).
   2. Signal confidence $\ge 85\%$.
-  3. Confluence score $\ge 3$ (minimum 3 independent families voting).
+  3. Confluence score $\ge 2$ in `TRENDING_BULL`/`TRENDING_BEAR` regime; $\ge 3$ in `CHOPPY_RANGE` or unknown regime.
   4. Symbol is not already an open active trade.
 
 ### 4.3 Two-Legged Order Routing & Pending Timeout
@@ -137,47 +140,51 @@ The core engine is encapsulated in [backend/trading_engine.py](file:///home/goku
 Signal Triggered
        │
        ▼
-1R Position Sizer (max ₹4,000 margin, 5x MIS)
+1R Position Sizer (max ₹8,000 margin, 5x MIS → ₹40k exposure; 1R budget = ₹700)
        │
        ▼
-LIMIT Entry Order placed at entryPrice
+LEG 1: LIMIT order for 50% qty at nearest value level (max(VWAP, EMA20, BreakoutLevel))
        │
-       ├─► Sits in pending_orders (max 60 seconds)
+       ├─► Sits in pending_orders (max 15 seconds TTL)
        │         │
-       │         ├─► If unfilled after 60s ──► smart_api_client.cancel_order()
+       │         ├─► On COMPLETE fill:
+       │         │         │
+       │         │         ▼
+       │         │   Place Native Exchange STOPLOSS_LIMIT for Leg 1 qty (full risk protection)
+       │         │         │
+       │         │         ▼
+       │         │   LEG 2: LIMIT order for remaining 50% qty at pullback (max(VWAP, EMA20))
+       │         │         │
+       │         │         ├─► On Leg 2 fill → compute weighted average entry; update active_trades
+       │         │         └─► On Leg 2 timeout (2× normal TTL) → Leg 1 runs as normal position
        │         │
-       │         └─► On COMPLETE fill:
-       │                   │
-       │                   ▼
-       │             Place Native Exchange STOPLOSS_LIMIT Order on Angel One
-       │             (trigger = stop_loss, limit = stop_loss * 0.99 / 1.01)
-       ▼
-Add to active_trades & persist to disk
+       │         └─► If Leg 1 unfilled after 15s ──► smart_api_client.cancel_order()
+       │
+       └─► Add to active_trades & persist to disk
 ```
 
-### 4.4 Partial Profit Booking & Breakeven SL
-When a trade reaches an asymmetric setup ($R:R > 2.2$):
-- **Target 1**: Placed at $+2.0R$.
+### 4.4 Front-Loaded Profit Booking (+1.2R) & Breakeven Friction Guard
+- **Target 1**: Placed at **$+1.2R$** (front-loaded to capture intraday expansion before mean-reversion).
 - **Target 2**: Full runner target.
-- **Trigger Condition**: When LTP reaches Target 1 and expected profit $\ge ₹250$ (safeguard against ₹20 broker fee drag):
+- **Trigger Condition**: When LTP reaches Target 1 and expected profit covers round-trip statutory friction:
   1. Closes $50\%$ of the quantity with an immediate exit `LIMIT` order.
-  2. Cancels the original full-quantity exchange stop-loss order.
-  3. Ratchets the remaining $50\%$ position's stop-loss to **Breakeven (entry price)**.
-  4. Places a new exchange `STOPLOSS_LIMIT` order at breakeven for the remaining runner shares.
-  5. Dispatches a Telegram `PARTIAL_TARGET` alert.
+  2. Atomically modifies the existing exchange `STOPLOSS_LIMIT` order via `order_manager.atomic_modify_stop_loss()` to the remaining $50\%$ quantity and **Breakeven + RoundTripFrictionPerShare** trigger/limit. This guarantees non-negative net P&L after all regulatory friction even on breakeven stop-outs.
+  3. **Emergency Circuit Breaker**: If atomic order modification fails, the system immediately triggers an emergency market close (`order_manager.emergency_market_close()`) to prevent unhedged exposure.
+  4. Dispatches a Telegram `PARTIAL_TARGET` alert.
 
 ### 4.5 ATR Trailing Stop-Loss Ratchet
-- Controlled by `trailingSlEnabled`, `trailingSlAtrMultiplier` ($2.0\times$ default), and `trailingSlProfitCushionR` ($+1.0R$ default).
-- Trailing **does not engage immediately**; price must advance at least $+1.0R$ in profit.
-- Once activated, SL ratchets to at least breakeven, trailing $2.0 \times \text{ATR}$ behind the high/low water mark.
+- Controlled by `trailingSlEnabled`, `trailingSlAtrMultiplier` ($2.2\times$ default), and `trailingSlProfitCushionR` ($+1.5R$ default).
+- Trailing **does not engage immediately**; price must advance at least $+1.5R$ in profit (prevents premature choking on 5m noise).
+- Once activated, SL ratchets to at least breakeven, trailing $2.2 \times \text{ATR}$ behind the high/low water mark.
 - When ratcheted, the engine executes `smart_api_client.modify_order` to update the exchange-side `STOPLOSS_LIMIT` order on Angel One's servers.
 
-### 4.6 Graduated Thesis Invalidation (Position Re-Evaluation)
+### 4.6 Graduated Thesis Invalidation & Idle Circuit Breaker
 Open positions are checked every 60 seconds against current market signals:
 1. **Rule 1 (Strong Opposing Signal)**: If $\ge 2$ opposing signals fire with $0$ supporting signals $\rightarrow$ Immediate thesis exit.
 2. **Rule 2 (Weak Conviction)**: If $0$ supporting signals, position is in loss, and held for $\ge 15$ minutes $\rightarrow$ Immediate exit.
-3. **Rule 3 (Time Decay)**: If held for $\ge 45$ minutes without hitting target $\rightarrow$ Stop-loss is tightened to Breakeven.
-4. **Rule 4 (Thesis Valid)**: If supporting signals $> 0 \rightarrow$ Position held.
+3. **Rule 3 (Idle Trade Circuit Breaker)**: If held for $\ge 20$ minutes without tagging $+0.5R$ $\rightarrow$ Immediate market exit to eliminate stagnation and capital lockup.
+4. **Rule 3b (Time Decay)**: If held for $\ge 20$ minutes and in profit $\rightarrow$ Stop-loss is tightened to Breakeven.
+5. **Rule 4 (Thesis Valid)**: If supporting signals $> 0 \rightarrow$ Position held.
 
 ### 4.7 End of Day Square-Off & Daily Summary
 - At **15:15 IST** (or when daily loss limit is hit), the engine calls `square_off_all()`.
@@ -227,6 +234,8 @@ Candidates from the 180+ F&O universe must pass 5 quantitative gates to be inclu
 - **HTTP Keep-Alive Connection Pooling**: Configured a persistent `requests.Session` with `HTTPAdapter(pool_connections=25, pool_maxsize=50, max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504]))` and patched `SmartApi.smartConnect.requests.request = self.http_session.request`. This eliminates continuous TCP 3-way handshake and TLS renegotiation churn that previously triggered Angel One WAF socket drops (`RemoteDisconnected`, `Connection aborted`).
 - **SmartAPI Timeout Calibration**: Hardcoded library default of 7 seconds was overridden with a 20-second connection & read timeout (`SmartConnect(timeout=20)` and `self.smart_api.timeout = 20`) to eliminate `requests.exceptions.ReadTimeout` errors during peak-hour batch candle and quote requests.
 - **Exhaustive Headless Session Renewal & Network Retry**: All data endpoints (`getCandleData`, `getMarketData`, `rmsLimit`, `holding`, `tradeBook`, `position`, `orderBook`, `placeOrder`, `cancelOrder`, `modifyOrder`, `estimateCharges`) are wrapped by `_execute_with_auth_retry()`. Intercepts HTTP errors and response bodies containing `AG8001`, `AG8002`, `AG8003` ("Token missing"), `AB1004`, or expired session states, immediately executing a headless TOTP re-login via `pyotp` and retrying the failed call seamlessly. In addition, transient network glitches (`remotedisconnected`, `connection aborted`, `read timeout`) are caught with an exponential backoff retry loop (up to 3 attempts) before failing.
+- **Proactive Candle Rate Pacing (< 2 req/sec)**: SmartAPI enforces a strict 3 calls/sec rate limit on `getCandleData` across the user account. Added a thread-safe `_candle_lock` and timestamp tracker in `SmartApiClient.get_historical_data` ensuring consecutive calls are spaced by $\ge 0.55$ seconds (~1.8 req/sec) to eliminate rolling 1-second burst violations. In addition, `get_quote` fallback and `get_ltp` loops are paced at $\ge 0.35$s.
+- **SmartAPI Rate Limit Interception & Exponential Backoff**: `_execute_with_auth_retry()` intercepts `"exceeding access rate"`, `"access rate"`, `"rate limit"`, `"too many requests"`, and `"429"` in both exceptions and response bodies. When triggered, the system pauses with exponential backoff (`1.5s * attempt`) and retries up to 3 times automatically, preventing rate limit spillover into concurrent position and order calls.
 - **Chunked Quote Fetching with Pacing**: Batch quote fetches across the 180+ F&O universe are executed in chunks of 50 with a 0.5s inter-chunk pacing delay and up to 3 retry attempts per chunk (1.5s delay) to ensure temporary exchange quote hiccups do not abort screening.
 - **Clean Subprocess Logging**: Replaced raw `print()` statements in `backend/scanner.py` with `logger.warning()` to prevent unformatted non-JSON messages from corrupting the Electron JSON-RPC standard I/O pipe.
 
@@ -245,7 +254,8 @@ Each signal family counts as **exactly ONE vote** in the confluence score, regar
 ├──────────────┬─────────────────────────────────────────────────────────────┤
 │ 1. Breakout  │ donchian_breakout, keltner_breakout, bollinger_breakout     │
 │ 2. Structure │ institutional_absorption, order_block_fvg,                  │
-│              │ volume_delta_divergence, cpr_breakout_reversal             │
+│              │ volume_delta_divergence, cpr_breakout_reversal,             │
+│              │ fixed_range_volume_profile (POC/VAH/VAL)                    │
 │ 3. Volume    │ cmf_accumulation                                            │
 │ 4. Intraday  │ vwap_bounce, opening_range_breakout                         │
 │ 5. Reversal  │ liquidity_grab_reversal, gap_fill                           │
@@ -262,7 +272,7 @@ Every candidate signal must clear the following sequentially:
 2. **Trend Alignment Gate**:
    - `BUY` signals require $\text{Close} \ge 50\text{ EMA}$.
    - `SELL` signals require $\text{Close} \le 50\text{ EMA}$.
-3. **Confluence Gate**: $\text{Confluence Score} \ge 3$ independent signal families.
+3. **Adaptive Confluence Gate**: In `TRENDING_BULL`/`TRENDING_BEAR` regime, $\text{Confluence Score} \ge 2$ (breakout/trend family + volume/momentum family). In `CHOPPY_RANGE` or unknown regime, $\text{Confluence Score} \ge 3$ independent signal families.
 4. **Market Regime Gate**: `is_trade_allowed_by_regime()` verifies current symbol regime.
 5. **Stop-Loss Minimum Floor**: Enforces a minimum $1.0\%$ stop-loss width to prevent noise stop-outs.
 6. **1:2 R:R Geometry Target**: Targets are recalculated to guarantee at least $1:2$ Risk-to-Reward ratio against the widened SL buffer.
@@ -271,8 +281,9 @@ Every candidate signal must clear the following sequentially:
 Based on walk-forward backtest analysis under Indian statutory friction:
 - **Enabled (Alpha Positive)**:
   - Breakouts: `donchian_breakout`, `keltner_breakout`, `bollinger_breakout`
-  - Institutional: `institutional_absorption`, `order_block_fvg`, `volume_delta_divergence`
-  - Intraday & Structural: `cpr_breakout_reversal`, `opening_range_breakout`, `liquidity_grab_reversal`, `gap_fill`, `cmf_accumulation`
+  - Auction Structure & Volume: `fixed_range_volume_profile` (POC/VAH/VAL), `volume_delta_divergence`, `cmf_accumulation`
+  - Institutional: `institutional_absorption`, `order_block_fvg`
+  - Intraday & Structural: `cpr_breakout_reversal`, `opening_range_breakout`, `liquidity_grab_reversal`, `gap_fill`
 - **Disabled by Default (Pruned due to Fee Drag / Negative Expectancy)**:
   - `psar_trend` (-₹8,575 backtest loss, lag whipsaw)
   - `ema_crossover` (-₹2,201 backtest loss)
@@ -308,9 +319,9 @@ Calculated for both live estimates and backtesting:
 
 | Component | NSE Cash Intraday MIS Rate |
 | :--- | :--- |
-| **Brokerage** | $\min(₹20, 0.1\% \times \text{Turnover})$ per leg (Angel One official tariff; flat ₹40 round-trip max) |
+| **Brokerage** | $\max(₹5, \min(₹20, 0.1\% \times \text{Turnover}))$ per executed order (Angel One official tariff; min ₹5, max ₹20 per leg) |
 | **Securities Transaction Tax (STT)** | $0.025\%$ on the **Sell** side turnover |
-| **Exchange Transaction Charges** | $0.00325\%$ of total round-trip turnover |
+| **Exchange Transaction Charges** | $0.00297\%$ of total round-trip turnover (NSE cash intraday uniform charge under SEBI True-to-Label) |
 | **SEBI Turnover Charges** | $₹10 \text{ per Crore} = 0.0001\%$ of round-trip turnover |
 | **Stamp Duty** | $0.003\%$ on the **Buy** side turnover |
 | **Goods & Services Tax (GST)** | $18\%$ applied to $(\text{Brokerage} + \text{Exchange Charges} + \text{SEBI Charges})$ |
@@ -390,6 +401,8 @@ The Electron main process communicates with the Python backend over standard `st
 | `swing_scan` | `{"limit": int}` | Executes multi-timeframe swing screener scan. |
 | `market_status` | None | Returns current market status (open, closed, holiday info). |
 | `telegram_test` | `{"botToken": str, "chatId": str}` | Dispatches a test connectivity message to Telegram. |
+| `log_get_all` | None | Retrieves buffered in-memory logs (last 300 entries) from the trading engine. |
+| `log_clear` | None | Clears the backend log ring buffer. |
 
 ---
 

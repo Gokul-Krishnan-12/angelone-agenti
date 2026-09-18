@@ -77,7 +77,7 @@ class Settings(BaseSettings):
         description="Securities Transaction Tax: 0.025% on sell turnover",
     )
     exchange_turnover_rate: float = Field(
-        default=0.0000325, description="NSE turnover fee: 0.00325% on both buy & sell"
+        default=0.0000297, description="NSE turnover fee: 0.00297% on both buy & sell (SEBI True-to-Label)"
     )
     sebi_turnover_rate: float = Field(
         default=0.000001, description="SEBI charge: ₹10 per crore (0.0001%)"

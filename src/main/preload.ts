@@ -88,6 +88,8 @@ try {
     },
     watchlist: {
       get: () => electron.ipcRenderer.invoke(channels.WATCHLIST_GET),
+      getDynamic: () => electron.ipcRenderer.invoke(channels.WATCHLIST_GET_DYNAMIC),
+      rescreen: () => electron.ipcRenderer.invoke(channels.WATCHLIST_RESCREEN),
       add: (symbol: string) => electron.ipcRenderer.invoke(channels.WATCHLIST_ADD, symbol),
       remove: (symbol: string) => electron.ipcRenderer.invoke(channels.WATCHLIST_REMOVE, symbol),
       onUpdate: (callback: (data: any) => void) => {

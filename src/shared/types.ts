@@ -272,6 +272,7 @@ export interface RiskConfig {
   trailingSlEnabled?: boolean;
   trailingSlAtrMultiplier?: number;
   trailingSlProfitCushionR?: number;
+  pendingOrderTimeoutSeconds?: number;
 }
 
 // ─── Strategy Configuration ───────────────────────────────────────
@@ -464,6 +465,8 @@ export interface ElectronAPI {
   };
   watchlist: {
     get: () => Promise<any>;
+    getDynamic: () => Promise<any>;
+    rescreen: () => Promise<any>;
     add: (symbol: string) => Promise<any>;
     remove: (symbol: string) => Promise<any>;
     onUpdate: (callback: (data: any) => void) => () => void;

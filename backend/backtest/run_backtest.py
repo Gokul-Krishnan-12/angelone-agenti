@@ -48,7 +48,7 @@ NIFTY_50_SUBSET = [
 SHORT_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
 
-DEFAULT_BLACKLIST: List[str] = []
+DEFAULT_BLACKLIST: List[str] = ["PGEL", "TIINDIA", "RECLTD"]
 
 
 def screen_top_momentum_fno(
@@ -70,7 +70,7 @@ def screen_top_momentum_fno(
     from ..fno_universe import get_fno_universe
     from ..screener import calculate_kaufman_efficiency_ratio
 
-    active_blacklist = set(blacklist if blacklist is not None else DEFAULT_BLACKLIST)
+    active_blacklist = set(blacklist if blacklist else DEFAULT_BLACKLIST)
 
     fno = [s for s in get_fno_universe() if s not in active_blacklist]
     print(f"\n[Screener] Screening {len(fno)} F&O stocks (KER gate: >= {min_ker})...")
@@ -137,10 +137,11 @@ def screen_top_momentum_fno(
             )
 
             score = (
-                (range_pct * 1.5)
-                + (body_pct * 1.5)
+                (ker * 25.0)
+                + (dir_efficiency * 20.0)
+                + (range_pct * 1.0)
+                + (body_pct * 1.0)
                 + (net_move * 0.5)
-                + (dir_efficiency * 10.0)
             )
             scores.append((s, score))
         except Exception:
@@ -236,6 +237,12 @@ def main():
         help="Disable the 50-EMA trend alignment quality filter",
     )
     parser.add_argument(
+        "--disabled-strategies",
+        nargs="*",
+        default=None,
+        help="Optional list of strategy IDs to disable",
+    )
+    parser.add_argument(
         "--min-price",
         type=float,
         default=100.0,
@@ -262,15 +269,16 @@ def main():
     parser.add_argument(
         "--blacklist",
         nargs="*",
-        default=[],
-        help="Symbols to exclude from trading (default: none, handled dynamically by KER)",
+        default=None,
+        help="Symbols to exclude from trading (default: PGEL, TIINDIA, RECLTD, plus dynamic KER)",
     )
 
     args = parser.parse_args()
 
     # Symbol selection
     if args.symbols:
-        symbols = [s for s in args.symbols if s not in args.blacklist]
+        blacklist = set(args.blacklist or DEFAULT_BLACKLIST)
+        symbols = [s for s in args.symbols if s not in blacklist]
     elif args.universe == "fno":
         symbols = screen_top_momentum_fno(
             period=args.period,
@@ -342,6 +350,7 @@ def main():
         trail_after_r=args.trail_after_r,
         trend_aligned=not args.no_trend_filter,
         min_sl_pct=args.min_sl_pct,
+        disabled_strategies=args.disabled_strategies,
     )
     trades = engine.run(symbol_dfs)
     elapsed = time.time() - t0

@@ -19,17 +19,18 @@ import {
 // Top 10 strategies selected by 6-month backtest P&L on 20 Nifty 50 stocks.
 // ── Active Alpha Suite: Breakout, Institutional Volume, Reversals ──────────
 export const ALL_STRATEGIES = [
-  { id: 'cpr_breakout_reversal',   name: 'Central Pivot Range (CPR)', category: 'Smart Money', rank: 1, winRate: 75 },
-  { id: 'liquidity_grab_reversal', name: 'Liquidity Grab Reversal',  category: 'Smart Money', rank: 2, winRate: 78 },
-  { id: 'opening_range_breakout',  name: 'Opening Range Breakout',   category: 'Intraday',    rank: 3, winRate: 72 },
-  { id: 'gap_fill',                name: 'Gap Fill Reversal',         category: 'Reversal',    rank: 4, winRate: 68 },
-  { id: 'order_block_fvg',          name: 'Order Block & FVG',       category: 'Smart Money', rank: 5, winRate: 65 },
-  { id: 'institutional_absorption', name: 'Institutional Absorption',category: 'Smart Money', rank: 6, winRate: 64 },
-  { id: 'volume_delta_divergence', name: 'Volume Delta Divergence',  category: 'Smart Money', rank: 7, winRate: 62 },
-  { id: 'cmf_accumulation',        name: 'CMF Institutional Flow',  category: 'Smart Money', rank: 8, winRate: 60 },
-  { id: 'bollinger_breakout',      name: 'Bollinger Breakout',      category: 'Breakout',    rank: 9, winRate: 58 },
-  { id: 'keltner_breakout',        name: 'Keltner Breakout',        category: 'Breakout',    rank: 10, winRate: 57 },
-  { id: 'donchian_breakout',        name: 'Donchian Breakout',       category: 'Breakout',    rank: 11, winRate: 55 },
+  { id: 'cpr_breakout_reversal',       name: 'Central Pivot Range (CPR)',         category: 'Smart Money', rank: 1, winRate: 75 },
+  { id: 'liquidity_grab_reversal',     name: 'Liquidity Grab Reversal',          category: 'Smart Money', rank: 2, winRate: 78 },
+  { id: 'opening_range_breakout',      name: 'Opening Range Breakout',           category: 'Intraday',    rank: 3, winRate: 72 },
+  { id: 'gap_fill',                    name: 'Gap Fill Reversal',                 category: 'Reversal',    rank: 4, winRate: 68 },
+  { id: 'order_block_fvg',              name: 'Order Block & FVG',               category: 'Smart Money', rank: 5, winRate: 65 },
+  { id: 'institutional_absorption',     name: 'Institutional Absorption',        category: 'Smart Money', rank: 6, winRate: 64 },
+  { id: 'volume_delta_divergence',     name: 'Volume Delta Divergence',          category: 'Smart Money', rank: 7, winRate: 62 },
+  { id: 'fixed_range_volume_profile',   name: 'Fixed Range Volume Profile (FRVP)', category: 'Smart Money', rank: 8, winRate: 66 },
+  { id: 'cmf_accumulation',            name: 'CMF Institutional Flow',          category: 'Smart Money', rank: 9, winRate: 60 },
+  { id: 'bollinger_breakout',          name: 'Bollinger Breakout',              category: 'Breakout',    rank: 10, winRate: 58 },
+  { id: 'keltner_breakout',            name: 'Keltner Breakout',                category: 'Breakout',    rank: 11, winRate: 57 },
+  { id: 'donchian_breakout',            name: 'Donchian Breakout',               category: 'Breakout',    rank: 12, winRate: 55 },
 ];
 
 // Disabled — lagging indicators & negative expectancy oscillators pruned to prevent fee drag

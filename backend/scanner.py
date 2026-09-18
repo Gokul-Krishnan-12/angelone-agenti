@@ -56,6 +56,9 @@ from .strategies.cmf_accumulation import CMFAccumulationStrategy
 from .strategies.cpr_breakout_reversal import CPRBreakoutReversalStrategy
 from .strategies.donchian_breakout import DonchianBreakoutStrategy
 from .strategies.ema_crossover import EMACrossoverStrategy
+from .strategies.fixed_range_volume_profile import (
+    FixedRangeVolumeProfileStrategy,
+)
 from .strategies.gap_fill import GapFillStrategy
 from .strategies.institutional_absorption import InstitutionalAbsorptionStrategy
 from .strategies.keltner_breakout import KeltnerBreakoutStrategy
@@ -97,6 +100,7 @@ STRATEGY_FAMILIES: Dict[str, Set[str]] = {
         "order_block_fvg",
         "volume_delta_divergence",
         "cpr_breakout_reversal",
+        "fixed_range_volume_profile",
     },
     # High-win-rate reversal strategies form their own family
     "reversal": {"liquidity_grab_reversal", "gap_fill"},
@@ -122,23 +126,22 @@ def _is_market_open_phase(no_entry_mins: int) -> bool:
     return market_open <= now < no_entry_end
 
 
-def _is_entry_window(no_entry_mins: int = 15) -> bool:
+def _is_entry_window(no_entry_mins: int = 15, ker: float = 0.50) -> bool:
     """
-    Return True if current time falls inside a high-probability entry window.
+    Return True if current time falls within the continuous intraday entry window.
 
-    Intraday trading windows:
-      • Morning session: post-open chaos (09:15 + no_entry_mins, e.g. 09:30) through 11:45 IST
-      • Afternoon session: 13:00 through 15:00 IST (pre-square-off)
-
-    Outside market hours (backtesting / paper mode) always returns True so
-    that the scanner can still generate signals during development.
+    Intraday trading window:
+      • Active continuously from market opening buffer (09:15 + no_entry_mins, e.g. 09:30)
+        all the way through 15:00 IST (pre-square-off cutoff).
+      • Midday restriction removed: technical confluence, regime gates, and 1:2 R:R geometry
+        protect entries without arbitrary time-of-day lockouts.
     """
     now = datetime.datetime.now().time()
     market_open_t = datetime.time(9, 15)
-    market_close_t = datetime.time(15, 30)
+    market_close_t = datetime.time(15, 0)  # No new entries in last 30 minutes
 
     # Outside market hours → don't gate (backtest / paper trading)
-    if now < market_open_t or now > market_close_t:
+    if now < market_open_t or now > datetime.time(15, 30):
         return True
 
     start_min = 15 + max(0, no_entry_mins)
@@ -146,9 +149,9 @@ def _is_entry_window(no_entry_mins: int = 15) -> bool:
     start_minute = start_min % 60
     window_start = datetime.time(start_hour, start_minute)
 
-    window_1 = window_start <= now <= datetime.time(11, 45)
-    window_2 = datetime.time(13, 0) <= now <= datetime.time(15, 0)
-    return window_1 or window_2
+    # Active continuous intraday trading from window_start to 15:00 IST
+    return window_start <= now <= market_close_t
+
 
 
 # ─── Scanner ──────────────────────────────────────────────────────────────────
@@ -183,6 +186,7 @@ class Scanner:
             "liquidity_grab_reversal": LiquidityGrabReversalStrategy(),
             "gap_fill": GapFillStrategy(),
             "cpr_breakout_reversal": CPRBreakoutReversalStrategy(),
+            "fixed_range_volume_profile": FixedRangeVolumeProfileStrategy(),
         }
         self.candle_cache: Dict[Any, pd.DataFrame] = {}
         self.last_cache_time: Dict[Any, datetime.datetime] = {}
@@ -256,32 +260,46 @@ class Scanner:
         if not dir_signals:
             return None
 
-        # ── 1. Trend Alignment Gate (against 50 EMA) ───────────────────
+        # ── 1. Trend Alignment Gate (against 20/50 EMA) ───────────────────
         direction = dir_signals[0].get("direction", "BUY")
-        if trend_aligned and df is not None and len(df) >= 50:
+        if trend_aligned and df is not None and len(df) >= 20:
             closes = df["close"]
-            ema50 = closes.ewm(span=50, adjust=False).mean().iloc[-1]
+            ema20 = closes.ewm(span=20, adjust=False).mean().iloc[-1]
+            ema50 = (
+                closes.ewm(span=50, adjust=False).mean().iloc[-1]
+                if len(df) >= 50
+                else ema20
+            )
             curr_close = closes.iloc[-1]
-            if direction == "BUY" and curr_close < ema50:
-                return None  # reject counter-trend longs below 50 EMA
-            if direction == "SELL" and curr_close > ema50:
-                return None  # reject counter-trend shorts above 50 EMA
+            # Reject only when price is below BOTH 20 EMA and 50 EMA for longs, or above BOTH for shorts
+            if direction == "BUY" and curr_close < ema50 and curr_close < ema20:
+                return None  # reject confirmed counter-trend longs
+            if direction == "SELL" and curr_close > ema50 and curr_close > ema20:
+                return None  # reject confirmed counter-trend shorts
 
-        # ── 2. Confluence Score Gate ──────────────────────────────────
+
+        # ── 2. Adaptive Confluence Score Gate ────────────────────────
+        # TRENDING_BULL/TRENDING_BEAR: 2-family minimum (breakout/trend + volume/momentum)
+        # CHOPPY_RANGE/unknown: 3-family minimum
         families_seen: Set[str] = set()
         for sig in dir_signals:
             strat_id = sig.get("_strategy_id", "")
             families_seen.add(_get_strategy_family(strat_id))
 
         confluence_score = len(families_seen)
+        # Adaptive threshold — determined after regime is known; pre-check with min_confluence
+        # The regime check below may adjust effective_min_confluence downward for trending regimes
         if confluence_score < min_confluence:
-            return None
+            # Will re-check after regime classification; skip if even regime-reduced threshold won't pass
+            pass  # continue to regime block which sets effective_min_confluence
 
         # Take the signal with the highest confidence
         best = max(dir_signals, key=lambda s: s.get("confidence", 0))
 
         # ── 3. Market Regime Filter (suppress false-breakout churn in chop) ──
+        # Also drives adaptive confluence: trending regimes allow 2-family minimum
         regime_meta: Optional[Any] = None
+        effective_min_confluence = min_confluence  # default (choppy / unknown)
         if regime_enabled and df is not None and len(df) >= 20:
             regime_result = classify_market_regime(
                 df, min_adx=regime_min_adx, min_ker=regime_min_ker
@@ -299,11 +317,44 @@ class Scanner:
                 return None
             regime_meta = regime_result
 
-        # ── 4. Minimum Stop-Loss Buffer & 1:2 R:R Target Geometry ──────
+            # Adaptive confluence: in strong trending regimes, relax to 2-family minimum
+            if regime_result.regime in ("TRENDING_BULL", "TRENDING_BEAR"):
+                from .config import config_manager as _cfg
+                trending_min = int(
+                    _cfg.get_risk_config().get("minConfluenceScoreTrending", 2)
+                )
+                effective_min_confluence = min(min_confluence, trending_min)
+
+        # Apply the (possibly regime-adjusted) confluence threshold now
+        if confluence_score < effective_min_confluence:
+            return None
+
+        # ── 4. Value Pullback Limit Entry & Volatility-Buffered Stop-Loss ──
         best = dict(best)
         entry_p = float(best.get("entryPrice", best.get("price", 0.0)))
         sl_p = float(best.get("stopLoss", best.get("sl", 0.0)))
         raw_target = float(best.get("target", 0.0))
+
+        if df is not None and len(df) >= 5:
+            from .strategy_engine import (
+                calculate_pullback_limit_entry,
+                calculate_volatility_buffered_sl,
+            )
+
+            # Task 2: Shift from breakout chasing to nearest value pullback limit order
+            pullback_entry = calculate_pullback_limit_entry(
+                df=df, direction=direction, breakout_level=entry_p
+            )
+            if pullback_entry > 0:
+                entry_p = pullback_entry
+                best["entryPrice"] = entry_p
+
+            # Task 1: Add 0.5x ATR volatility buffer to structural stop losses
+            buffered_sl = calculate_volatility_buffered_sl(
+                df=df, direction=direction, raw_sl=sl_p, lookback=10, atr_multiplier=0.5
+            )
+            if buffered_sl > 0:
+                sl_p = buffered_sl
 
         if entry_p > 0 and sl_p > 0:
             raw_risk = abs(entry_p - sl_p)
@@ -385,9 +436,9 @@ class Scanner:
                 return []
 
             df, was_cached = self._fetch_candles(token, symbol)
+            if not was_cached:
+                time.sleep(0.35)
             if df.empty:
-                if not was_cached:
-                    time.sleep(0.4)
                 return []
 
             # ── 15:15 Intraday Cutoff Gate ────────────────────────────
@@ -402,10 +453,20 @@ class Scanner:
                 except Exception:
                     pass
 
-            # ── Regime detection ───────────────────────────────────────
+            # ── Regime detection & KER push for midday gate ──────────────
             from .strategies.utils import compute_regime
+            from .market_regime import calculate_ker as _calc_ker
+            from .risk_manager import risk_manager as _risk_mgr
 
             regime = compute_regime(df)
+
+            # Push symbol-level KER to risk_manager so that can_trade()'s midday
+            # chop gate becomes regime-aware (only blocks when KER < 0.30)
+            if len(df) >= 21:
+                sym_ker = _calc_ker(df["close"], period=20)
+                _risk_mgr.set_market_ker(sym_ker)
+            else:
+                _risk_mgr.set_market_ker(0.0)  # unknown → safe block
 
             # ── Run all enabled strategies ─────────────────────────────
             buy_signals: List[Dict[str, Any]] = []

@@ -4,38 +4,61 @@ import { usePaperTradingStore } from '../stores/paper-trading-store';
 import * as IPC from '@shared/ipc-channels';
 import { OrderRequest, SmartApiCredentials } from '@shared/types';
 
+let globalListenersRegistered = false;
+
 export const useSmartAPI = () => {
   const store = useTradingStore();
 
   useEffect(() => {
     if (!window.electronAPI) return;
 
-    const unsubTick = window.electronAPI.on(IPC.TICKER_TICK, (event: any, data: any) => {
-      if (data) {
-        const symbol = data.tradingsymbol || data.symbol;
-        const price = Number(data.lastPrice ?? data.last_price ?? data.ltp ?? 0);
-        if (symbol) {
-          store.updateTick(symbol, { ...data, lastPrice: price });
+    if (!globalListenersRegistered) {
+      globalListenersRegistered = true;
+
+      window.electronAPI.on(IPC.TICKER_TICK, (event: any, data: any) => {
+        const item = data || event;
+        if (item) {
+          const symbol = item.tradingsymbol || item.symbol;
+          const price = Number(item.lastPrice ?? item.last_price ?? item.ltp ?? 0);
+          if (symbol) {
+            useTradingStore.getState().updateTick(symbol, { ...item, lastPrice: price });
+          }
+          if (price > 0 && symbol) {
+            usePaperTradingStore.getState().updateTickPrice(symbol, price);
+          }
         }
-        if (price > 0 && symbol) {
-          usePaperTradingStore.getState().updateTickPrice(symbol, price);
+      });
+
+      window.electronAPI.on(IPC.AGENT_SIGNAL, (event: any, data: any) => {
+        const sig = data || event;
+        if (sig) {
+          useTradingStore.getState().addSignal(sig);
+          if (sig.tradingsymbol && window.electronAPI?.ticker?.subscribe) {
+            const clean = sig.tradingsymbol.replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
+            window.electronAPI.ticker.subscribe([clean as any]).catch(() => {});
+          }
+          usePaperTradingStore.getState().executePaperTradeFromSignal(sig);
         }
-      }
-    });
-    const unsubSignal = window.electronAPI.on(IPC.AGENT_SIGNAL, (event: any, data: any) => {
-      store.addSignal(data);
-      if (data?.tradingsymbol && window.electronAPI?.ticker?.subscribe) {
-        const clean = data.tradingsymbol.replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
-        window.electronAPI.ticker.subscribe([clean as any]).catch(() => {});
-      }
-      usePaperTradingStore.getState().executePaperTradeFromSignal(data);
-    });
-    const unsubLog = window.electronAPI.on(IPC.LOG_ENTRY, (event: any, data: any) => {
-      store.addLogEntry(data);
-    });
-    const unsubAgentState = window.electronAPI.on(IPC.AGENT_STATE_UPDATE, (event: any, data: any) => {
-      store.setAgentState(data);
-    });
+      });
+
+      window.electronAPI.on(IPC.LOG_ENTRY, (event: any, data: any) => {
+        const entry = (data && data.message) ? data : (event && event.message ? event : data);
+        if (entry) {
+          useTradingStore.getState().addLogEntry(entry);
+          if (entry.message) {
+            const lvl = (entry.level || 'INFO').toUpperCase();
+            usePaperTradingStore.getState().addLog(lvl as any, entry.message);
+          }
+        }
+      });
+
+      window.electronAPI.on(IPC.AGENT_STATE_UPDATE, (event: any, data: any) => {
+        const st = data || event;
+        if (st) {
+          useTradingStore.getState().setAgentState(st);
+        }
+      });
+    }
 
     const init = async () => {
       try {
@@ -49,15 +72,30 @@ export const useSmartAPI = () => {
           store.setAgentState({ running: agentStat.running, mode: agentStat.mode || 'confirm' });
         }
         const settings = await window.electronAPI?.invoke(IPC.SETTINGS_GET);
-        if (settings && settings.strategies) {
-          const enabledStrats = Object.keys(settings.strategies).filter(
-            (s) => settings.strategies[s]?.enabled
-          );
-          store.setAgentState({ enabledStrategies: enabledStrats });
+        if (settings) {
+          if (settings.strategies) {
+            const enabledStrats = Object.keys(settings.strategies).filter(
+              (s) => settings.strategies[s]?.enabled
+            );
+            store.setAgentState({ enabledStrategies: enabledStrats });
+          }
           store.setSettings(settings);
+
+          // Synchronize global risk settings to Paper Trading sandbox
+          if (settings.risk) {
+            if (settings.risk.riskPerTrade) {
+              usePaperTradingStore.getState().setRiskPerTrade(Number(settings.risk.riskPerTrade));
+            }
+            if (settings.risk.maxCapitalPerTrade) {
+              usePaperTradingStore.getState().setMaxCapitalPerTrade(Number(settings.risk.maxCapitalPerTrade));
+            }
+            if (settings.risk.maxDailyTrades) {
+              usePaperTradingStore.getState().setMaxDailyTrades(Number(settings.risk.maxDailyTrades));
+            }
+          }
         }
         if (authStat === true) {
-          const summary = await window.electronAPI?.dashboard.summary({ force: true });
+          const summary = await window.electronAPI?.dashboard.summary({ force: false });
           if (summary) {
             store.setDashboard(summary);
           }
@@ -97,6 +135,20 @@ export const useSmartAPI = () => {
           const sigSyms = activeSignals.map((s) => s.tradingsymbol);
           window.electronAPI.ticker.subscribe(sigSyms as any).catch(() => {});
         }
+
+        // Retrieve and hydrate existing recent logs from Python backend so autonomous scan entries are always visible
+        try {
+          const recentLogs = await window.electronAPI?.log?.getAll();
+          if (Array.isArray(recentLogs) && recentLogs.length > 0) {
+            store.setActivityLog(recentLogs);
+            for (const l of [...recentLogs].reverse()) {
+              if (l.message) {
+                const lvl = (l.level || 'INFO').toUpperCase();
+                usePaperTradingStore.getState().addLog(lvl as any, l.message);
+              }
+            }
+          }
+        } catch (_) {}
       } catch (e) {
         console.error('Init Error', e);
       }
@@ -143,12 +195,11 @@ export const useSmartAPI = () => {
 
       isRealtimeLtpPolling = true;
       try {
-        const ltpData = await window.electronAPI.market.ltp(allOpenSymbols);
-        if (ltpData && typeof ltpData === 'object') {
-          for (const sym of allOpenSymbols) {
-            const clean = sym.replace('-EQ', '').replace('NSE:', '').trim().toUpperCase();
-            const val = ltpData[sym] || ltpData[clean] || ltpData[`NSE:${clean}`] || ltpData[`${clean}-EQ`];
-            const price = Number(val?.lastPrice ?? val?.last_price ?? val?.ltp ?? (typeof val === 'number' ? val : 0));
+        const quotes = await window.electronAPI.market.ltp(allOpenSymbols);
+        if (quotes && typeof quotes === 'object') {
+          for (const [sym, val] of Object.entries(quotes as Record<string, any>)) {
+            const clean = sym.replace('NSE:', '').replace('-EQ', '');
+            const price = Number(val.last_price ?? val.lastPrice ?? val.ltp ?? 0);
             if (price > 0) {
               store.updateTick(clean, { ...val, lastPrice: price });
               usePaperTradingStore.getState().updateTickPrice(clean, price);
@@ -175,10 +226,6 @@ export const useSmartAPI = () => {
       clearInterval(summaryInterval);
       clearInterval(realtimeLtpInterval);
       window.removeEventListener('focus', handleFocusSync);
-      window.electronAPI?.removeAllListeners(IPC.TICKER_TICK);
-      window.electronAPI?.removeAllListeners(IPC.AGENT_SIGNAL);
-      window.electronAPI?.removeAllListeners(IPC.LOG_ENTRY);
-      window.electronAPI?.removeAllListeners(IPC.AGENT_STATE_UPDATE);
     };
   }, []);
 

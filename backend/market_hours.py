@@ -209,6 +209,15 @@ def is_trading_holiday(
     return False, None
 
 
+def is_trading_day(target_date: Optional[datetime.date] = None) -> bool:
+    """Return True if target date is a weekday (Mon-Fri) and not an official exchange holiday."""
+    if is_weekend(target_date):
+        return False
+    is_holiday, _ = is_trading_holiday(target_date)
+    return not is_holiday
+
+
+
 def get_market_status(target_dt: Optional[datetime.datetime] = None) -> Dict[str, Any]:
     """
     Comprehensive Indian market status evaluation.

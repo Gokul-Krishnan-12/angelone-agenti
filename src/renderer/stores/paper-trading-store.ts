@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Signal } from '@shared/types';
 import { TELEGRAM_SEND_EXIT, TELEGRAM_SEND_SUMMARY } from '@shared/ipc-channels';
+import { useTradingStore } from './trading-store';
 
 export interface PaperPosition {
   id: string;
@@ -54,7 +55,7 @@ export interface PaperRejectedTrade {
 export interface PaperLogEntry {
   id: string;
   timestamp: string;
-  type: 'INFO' | 'SIGNAL' | 'EXECUTE' | 'TARGET' | 'STOPLOSS' | 'EXIT';
+  type: 'INFO' | 'SIGNAL' | 'EXECUTE' | 'TARGET' | 'STOPLOSS' | 'EXIT' | 'ORDER' | 'WARN' | 'ERROR';
   message: string;
 }
 
@@ -241,10 +242,11 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           return false;
         }
 
-        // High quality filter: require minimum confluence score of 3 independent families
+        // Adaptive confluence filter: signals from the backend scanner have already
+        // cleared the adaptive confluence gate (>=2 in trending, >=3 in chop). Floor is 2.
         const confluenceScore = Number(signal.confluenceScore || 1);
-        if (confluenceScore < 3) {
-          recordRejection(`Confluence Too Low (${confluenceScore}/3 independent families required)`);
+        if (confluenceScore < 2) {
+          recordRejection(`Confluence Too Low (${confluenceScore} independent families; min 2 required)`);
           return false;
         }
 
@@ -301,8 +303,10 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             : entryPrice * 1.015;
 
         // Position sizing: 1R risk-based sizing constrained by 5x MIS leverage & max capital ceiling
-        // Mirrors backend RiskManager.calculate_position_size
-        const marginToUse = Math.min(state.maxCapitalPerTrade, state.dummyBalance);
+        // Prioritizes master settings from the Settings page (useTradingStore), falling back to local paper settings
+        const masterRisk = useTradingStore.getState().settings?.risk;
+        const effectiveMaxCapital = Number(masterRisk?.maxCapitalPerTrade) || state.maxCapitalPerTrade || 8000;
+        const marginToUse = Math.min(effectiveMaxCapital, state.dummyBalance);
         if (marginToUse < 500) {
           recordRejection(`Insufficient Balance: ₹${state.dummyBalance.toLocaleString('en-IN')} available (min ₹500 required)`);
           return false;
@@ -310,7 +314,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 
         const effectiveExposure = marginToUse * 5;
         const maxAllowedQty = Math.floor(effectiveExposure / entryPrice);
-        const riskBudget = state.riskPerTrade || 500;
+        const riskBudget = Number(masterRisk?.riskPerTrade) || state.riskPerTrade || 1000;
         const perShareRisk = Math.abs(entryPrice - stopLoss);
         const rawQuantity = perShareRisk > 0 ? Math.floor(riskBudget / perShareRisk) : maxAllowedQty;
         const quantity = Math.max(1, rawQuantity > 0 ? Math.min(rawQuantity, maxAllowedQty) : maxAllowedQty);

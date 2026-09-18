@@ -658,7 +658,7 @@ const PaperTrade: React.FC = () => {
                   <span className="text-surface-500 text-[11px] shrink-0 pt-0.5">
                     {new Date(l.timestamp).toLocaleTimeString()}
                   </span>
-                  <span className={`px-2 py-0.2 rounded text-[10px] font-bold shrink-0 ${
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
                     l.type === 'EXECUTE'
                       ? 'bg-accent/20 text-accent-light'
                       : l.type === 'TARGET'
@@ -667,7 +667,13 @@ const PaperTrade: React.FC = () => {
                           ? 'bg-loss-dark/20 text-loss-light'
                           : l.type === 'EXIT'
                             ? 'bg-amber-500/20 text-amber-300'
-                            : 'bg-surface-700 text-surface-300'
+                            : l.type === 'SIGNAL'
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                              : l.type === 'ORDER'
+                                ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
+                                : l.type === 'ERROR' || l.type === 'WARN'
+                                  ? 'bg-loss-dark/20 text-loss-light border border-loss/30'
+                                  : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                   }`}>
                     {l.type}
                   </span>

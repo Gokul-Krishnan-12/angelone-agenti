@@ -172,6 +172,14 @@ export function setupIpcHandlers() {
     return await pythonBridge.call('watchlist_get');
   });
   
+  ipcMain.handle(channels.WATCHLIST_GET_DYNAMIC, async () => {
+    return await pythonBridge.call('watchlist_get_dynamic');
+  });
+  
+  ipcMain.handle(channels.WATCHLIST_RESCREEN, async () => {
+    return await pythonBridge.call('watchlist_rescreen');
+  });
+  
   ipcMain.handle(channels.WATCHLIST_ADD, async (_, symbol: string) => {
     return await pythonBridge.call('watchlist_add', { symbol });
   });

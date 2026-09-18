@@ -85,12 +85,12 @@ def test_screener_rvol_and_institutional_participation():
         assert stats_inst["score"] > stats_low["score"]
 
 
-def test_trading_engine_hourly_dynamic_rescreening():
-    """Verify that trading_engine re-screens every 1 hour and preserves open trades."""
+def test_trading_engine_periodic_dynamic_rescreening():
+    """Verify that trading_engine re-screens every 30 minutes and preserves open trades."""
     from backend.trading_engine import TradingEngine
 
     engine = TradingEngine()
-    engine.screener_interval = 3600  # 1 hour
+    assert engine.screener_interval == 1800  # 30 minutes default
     engine.active_trades["EXISTING_HOLDING"] = {"sl": 100.0, "target": 110.0}
 
     call_count = 0
@@ -104,32 +104,87 @@ def test_trading_engine_hourly_dynamic_rescreening():
         "backend.risk_manager.risk_manager.can_trade", return_value=(True, "OK")
     ):
         with patch.object(engine, "_reevaluate_positions"):
-            with patch(
-                "backend.screener.screener_engine.generate_daily_watchlist",
-                side_effect=mock_generate_watchlist,
-            ):
-                with patch("backend.scanner.scanner.scan_watchlist") as mock_scan:
-                    # 1. First scan: screener should run because dynamic_watchlist is empty
-                    engine.scan_and_trade()
-                    assert call_count == 1
-                    assert "EXISTING_HOLDING" in engine.dynamic_watchlist
-                    assert engine.dynamic_watchlist[0] == "STOCK_1_0"
-                    assert mock_scan.called
+            with patch("backend.ticker.ticker_manager.subscribe"):
+                with patch(
+                    "backend.screener.screener_engine.generate_daily_watchlist",
+                    side_effect=mock_generate_watchlist,
+                ):
+                    with patch("backend.scanner.scanner.scan_watchlist") as mock_scan:
+                        # 1. First scan: screener should run because dynamic_watchlist is empty
+                        engine.scan_and_trade()
+                        assert call_count == 1
+                        assert "EXISTING_HOLDING" in engine.dynamic_watchlist
+                        assert engine.dynamic_watchlist[0] == "STOCK_1_0"
+                        assert mock_scan.called
 
-                    # 2. Immediate second scan: screener should NOT re-run (< 1 hour)
-                    mock_scan.reset_mock()
-                    engine.scan_and_trade()
-                    assert call_count == 1
-                    assert mock_scan.called
+                        # 2. Immediate second scan: screener should NOT re-run (< 30 min)
+                        mock_scan.reset_mock()
+                        engine.scan_and_trade()
+                        assert call_count == 1
+                        assert mock_scan.called
 
-                    # 3. Simulate 3601 seconds (1 hour + 1 second) passing: screener SHOULD re-run
-                    engine._last_screener_time -= 3601
-                    mock_scan.reset_mock()
-                    engine.scan_and_trade()
-                    assert call_count == 2
-                    assert "EXISTING_HOLDING" in engine.dynamic_watchlist
-                    assert engine.dynamic_watchlist[0] == "STOCK_2_0"
-                    assert mock_scan.called
+                        # 3. Simulate 1801 seconds (30 minutes + 1 second) passing: screener SHOULD re-run
+                        engine._last_screener_time -= 1801
+                        mock_scan.reset_mock()
+                        engine.scan_and_trade()
+                        assert call_count == 2
+                        assert "EXISTING_HOLDING" in engine.dynamic_watchlist
+                        assert engine.dynamic_watchlist[0] == "STOCK_2_0"
+                        assert mock_scan.called
+
+
+def test_screener_window_strictly_930_to_1430():
+    """Verify that screener only runs between 09:30 and 14:30 IST on trading days."""
+    import datetime
+    from unittest.mock import patch
+    from backend.trading_engine import TradingEngine
+
+    engine = TradingEngine()
+    engine.dynamic_watchlist = None
+    call_count = 0
+
+    def mock_generate_watchlist(universe=None, limit=35):
+        nonlocal call_count
+        call_count += 1
+        return [f"STOCK_{call_count}_{i}" for i in range(limit)]
+
+    # Times: 09:18 AM (before 09:30), 09:30 AM (active window), 14:45 PM (after 14:30)
+    fake_0918 = datetime.datetime(2025, 1, 1, 9, 18, 0)
+    fake_0930 = datetime.datetime(2025, 1, 1, 9, 30, 5)
+    fake_1445 = datetime.datetime(2025, 1, 1, 14, 45, 0)
+
+    with patch("backend.risk_manager.risk_manager.can_trade", return_value=(True, "OK")):
+        with patch.object(engine, "_reevaluate_positions"):
+            with patch("backend.ticker.ticker_manager.subscribe"):
+                with patch("backend.screener.screener_engine.generate_daily_watchlist", side_effect=mock_generate_watchlist):
+                    with patch("backend.scanner.scanner.scan_watchlist"):
+                        with patch("backend.market_hours.is_trading_day", return_value=True):
+                            # 1. Startup at 09:18 AM — must NOT run (< 09:30)
+                            with patch("datetime.datetime") as mock_dt:
+                                mock_dt.now.return_value = fake_0918
+                                mock_dt.side_effect = lambda *args, **kw: datetime.datetime(*args, **kw)
+                                engine.scan_and_trade()
+
+                            assert call_count == 0
+                            assert "09:30" not in engine._screener_slots_completed
+
+                            # 2. Clock reaches 09:30 AM — MUST run
+                            with patch("datetime.datetime") as mock_dt:
+                                mock_dt.now.return_value = fake_0930
+                                mock_dt.side_effect = lambda *args, **kw: datetime.datetime(*args, **kw)
+                                engine.scan_and_trade()
+
+                            assert call_count == 1
+                            assert "09:30" in engine._screener_slots_completed
+
+                            # 3. Clock reaches 14:45 PM — must NOT run (> 14:30)
+                            with patch("datetime.datetime") as mock_dt:
+                                mock_dt.now.return_value = fake_1445
+                                mock_dt.side_effect = lambda *args, **kw: datetime.datetime(*args, **kw)
+                                engine.scan_and_trade()
+
+                            # Call count remains 1
+                            assert call_count == 1
 
 
 def test_trading_engine_manual_scan_activity_logging():
@@ -145,13 +200,14 @@ def test_trading_engine_manual_scan_activity_logging():
         logs_emitted.append((msg, level))
 
     with patch.object(engine, "_push_log", side_effect=mock_push_log):
-        with patch(
-            "backend.screener.screener_engine.generate_daily_watchlist",
-            return_value=["RELIANCE", "INFY", "TCS"],
-        ):
-            with patch("backend.scanner.scanner.scan_watchlist", return_value=[]):
-                signals = engine.manual_scan()
-                assert signals == []
+        with patch("backend.ticker.ticker_manager.subscribe"):
+            with patch(
+                "backend.screener.screener_engine.generate_daily_watchlist",
+                return_value=["RELIANCE", "INFY", "TCS"],
+            ):
+                with patch("backend.scanner.scanner.scan_watchlist", return_value=[]):
+                    signals = engine.manual_scan()
+                    assert signals == []
                 # Watchlist should contain screened stocks + existing holdings
                 assert "RELIANCE" in engine.dynamic_watchlist
                 assert "TATAMOTORS" in engine.dynamic_watchlist
@@ -160,6 +216,51 @@ def test_trading_engine_manual_scan_activity_logging():
                 assert any("Dynamic Watchlist updated [Manual Scan]" in msg for msg, lvl in logs_emitted)
                 assert any("RELIANCE, INFY, TCS" in msg for msg, lvl in logs_emitted)
                 assert any("Manual scan complete" in msg for msg, lvl in logs_emitted)
+
+
+def test_clock_screener_single_message_logging():
+    """Verify that run_clock_screener generates strictly one clean message at 30-min intervals."""
+    from backend.trading_engine import TradingEngine
+    from backend.screener import screener_engine
+
+    engine = TradingEngine()
+    logs_emitted = []
+
+    def mock_push_log(msg, level="info"):
+        logs_emitted.append((msg, level))
+
+    screener_engine.last_funnel_stats = {
+        "total_universe": 185,
+        "quotes_received": 185,
+        "valid_candidates": 180,
+        "passed_ker": 45,
+        "passed_rvol": 38,
+        "passed_turnover": 52,
+        "shortlisted_count": 35,
+    }
+    screener_engine.screener_stats = {
+        "RELIANCE": {"ker": 0.48, "rvol": 2.2, "turnover_cr": 150.0, "change_pct": 1.5, "score": 88.5},
+        "INFY": {"ker": 0.42, "rvol": 1.9, "turnover_cr": 95.0, "change_pct": -0.8, "score": 82.0},
+    }
+
+    with patch.object(engine, "_push_log", side_effect=mock_push_log):
+        with patch("backend.ticker.ticker_manager.subscribe"):
+            with patch.object(
+                screener_engine,
+                "generate_daily_watchlist",
+                return_value=["RELIANCE", "INFY"],
+            ):
+                engine.run_clock_screener(force=True, slot_label_override="10:00 IST")
+
+    # Strictly one single log for the 30-min scan
+    assert len(logs_emitted) == 1
+    msg, lvl = logs_emitted[0]
+    assert msg.startswith("⏱️ 30-Min Scan [10:00 IST] complete. Next autonomous scan scheduled at:")
+    assert lvl == "info"
+    # Verify no multi-line funnel or stock breakdown spam
+    assert not any("Funnel" in m for m, _ in logs_emitted)
+    assert not any("Breakdown" in m for m, _ in logs_emitted)
+
 
 
 def test_kaufman_efficiency_ratio_trending_series():

@@ -172,6 +172,7 @@ class DynamicScreener:
     def __init__(self):
         self.daily_watchlist: List[str] = []
         self.screener_stats: Dict[str, Dict[str, Any]] = {}
+        self.last_funnel_stats: Dict[str, Any] = {}
         self.daily_metrics_cache: Dict[str, Dict[str, Any]] = {}
         self._last_macro_eval_date: Optional[datetime.date] = None
         self.last_run_successful: bool = True
@@ -467,6 +468,21 @@ class DynamicScreener:
             self.daily_watchlist = top_stocks
             self.screener_stats = stats_map
             self.last_run_successful = bool(top_stocks)
+
+            passed_ker_count = sum(1 for s in scored_stocks if s.get("ker", 0) >= min_ker)
+            passed_rvol_count = sum(1 for s in scored_stocks if s.get("rvol", 0) >= 1.8)
+            passed_turnover_count = sum(1 for s in scored_stocks if s.get("turnover_cr", 0) >= 40.0)
+
+            self.last_funnel_stats = {
+                "total_universe": len(universe),
+                "quotes_received": len(quotes),
+                "valid_candidates": len(parsed_candidates),
+                "passed_ker": passed_ker_count,
+                "passed_rvol": passed_rvol_count,
+                "passed_turnover": passed_turnover_count,
+                "shortlisted_count": len(top_stocks),
+                "top_scored": scored_stocks[:7],
+            }
 
             top_summary = ", ".join(
                 f"{s['symbol']}(score={s['score']}, KER={s['ker']}, rvol={s['rvol']}x, to={s['turnover_cr']}Cr)"

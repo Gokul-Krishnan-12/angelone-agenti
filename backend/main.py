@@ -1,5 +1,6 @@
 import json
 import sys
+import time
 import traceback
 
 from .config import config_manager
@@ -333,13 +334,48 @@ def handle_request(req):
             return success(signals)
 
         elif method == "log_get_all":
-            return success([])
+            return success(trading_engine.get_recent_logs())
 
         elif method == "log_clear":
+            trading_engine.clear_recent_logs()
             return success({"status": "cleared"})
 
         elif method == "watchlist_get":
             return success(config_manager.get_watchlist())
+
+        elif method in ("watchlist_get_dynamic", "get_dynamic_watchlist"):
+            from .screener import screener_engine
+            from .fno_universe import get_fno_universe
+            wl = list(getattr(trading_engine, "dynamic_watchlist", []) or [])
+            if not wl:
+                wl = list(getattr(screener_engine, "daily_watchlist", []) or [])
+            if not wl:
+                fno = get_fno_universe()
+                custom_watchlist = config_manager.get_watchlist()
+                fallback = [s for s in custom_watchlist if s in fno] + [s for s in fno if s not in custom_watchlist]
+                wl = fallback[:35]
+                trading_engine.dynamic_watchlist = wl
+                import threading
+                threading.Thread(
+                    target=lambda: trading_engine.run_clock_screener(force=True, slot_label_override="Initial Watchlist Sync"),
+                    daemon=True,
+                ).start()
+            return success({
+                "stocks": wl,
+                "stats": getattr(screener_engine, "screener_stats", {}),
+                "last_run_time": getattr(trading_engine, "_last_screener_time", 0.0),
+                "last_run_successful": getattr(screener_engine, "last_run_successful", True),
+            })
+
+        elif method in ("watchlist_rescreen", "rescreen_dynamic_watchlist"):
+            from .screener import screener_engine
+            wl = trading_engine.run_clock_screener(force=True, slot_label_override="Manual Re-Screen")
+            return success({
+                "stocks": wl,
+                "stats": getattr(screener_engine, "screener_stats", {}),
+                "last_run_time": trading_engine._last_screener_time,
+                "last_run_successful": getattr(screener_engine, "last_run_successful", True),
+            })
 
         elif method == "watchlist_add":
             symbol = str(params.get("symbol", "")).upper().strip()

@@ -3,11 +3,29 @@ import { useTradingStore } from '../stores/trading-store';
 import { useSmartAPI } from '../hooks/useSmartAPI';
 import { useAutoReload } from '../hooks/useAutoReload';
 import { WatchlistItem, TransactionType } from '@shared/types';
-import { Search, X, Plus, TrendingUp, TrendingDown, RefreshCw, ShoppingCart } from 'lucide-react';
+import {
+  Search,
+  X,
+  Plus,
+  TrendingUp,
+  TrendingDown,
+  RefreshCw,
+  ShoppingCart,
+  Zap,
+  Eye,
+  Activity,
+  Clock,
+} from 'lucide-react';
 
 const Watchlist: React.FC = () => {
   const { watchlist, setWatchlist, ticks, settings } = useTradingStore();
   const { placeOrder } = useSmartAPI();
+
+  const [activeTab, setActiveTab] = useState<'dynamic' | 'custom'>('dynamic');
+  const [dynamicItems, setDynamicItems] = useState<WatchlistItem[]>([]);
+  const [screenerStats, setScreenerStats] = useState<Record<string, any>>({});
+  const [lastScreenerTime, setLastScreenerTime] = useState<number>(0);
+  const [isRescreening, setIsRescreening] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -38,8 +56,8 @@ const Watchlist: React.FC = () => {
 
   const searchRef = useRef<HTMLDivElement>(null);
 
-  // Load watchlist with fresh quotes
-  const loadWatchlist = async () => {
+  // Load Custom Watchlist with fresh quotes
+  const loadCustomWatchlist = async () => {
     try {
       setRefreshing(true);
       let symbols: string[] = [];
@@ -50,14 +68,13 @@ const Watchlist: React.FC = () => {
         symbols = settings?.watchlist || ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN'];
       }
 
-      // Fetch quotes to get fresh prices
       let quoteData: Record<string, any> = {};
       try {
         if (window.electronAPI?.market?.quote) {
           quoteData = await window.electronAPI.market.quote(symbols);
         }
       } catch (e) {
-        console.warn('Could not fetch quotes for watchlist:', e);
+        console.warn('Could not fetch quotes for custom watchlist:', e);
       }
 
       const items: WatchlistItem[] = symbols.map((sym: string) => {
@@ -86,14 +103,82 @@ const Watchlist: React.FC = () => {
 
       setWatchlist(items);
     } catch (err) {
-      console.error('Failed to load watchlist:', err);
+      console.error('Failed to load custom watchlist:', err);
     } finally {
       setRefreshing(false);
     }
   };
 
+  // Load Dynamic In-Play Watchlist from Screener
+  const loadDynamicWatchlist = async () => {
+    try {
+      if (window.electronAPI?.watchlist?.getDynamic) {
+        const res = await window.electronAPI.watchlist.getDynamic();
+        if (res && res.stocks && res.stocks.length > 0) {
+          setScreenerStats(res.stats || {});
+          setLastScreenerTime(res.last_run_time || 0);
+
+          let quoteData: Record<string, any> = {};
+          try {
+            if (window.electronAPI?.market?.quote) {
+              quoteData = await window.electronAPI.market.quote(res.stocks);
+            }
+          } catch (e) {
+            console.warn('Could not fetch quotes for dynamic watchlist:', e);
+          }
+
+          const items: WatchlistItem[] = res.stocks.map((sym: string) => {
+            const clean = sym.replace('NSE:', '').replace('-EQ', '').toUpperCase();
+            const quote = quoteData[sym] || quoteData[`NSE:${clean}`] || quoteData[clean];
+            const lastPrice = quote?.last_price || quote?.lastPrice || 0;
+            const close = quote?.ohlc?.close || quote?.close || lastPrice;
+            const change = close > 0 && lastPrice > 0 ? lastPrice - close : 0;
+            const changePercent = close > 0 ? (change / close) * 100 : 0;
+
+            return {
+              tradingsymbol: clean,
+              exchange: 'NSE',
+              instrumentToken: quote?.instrument_token || 0,
+              lastPrice,
+              change: Math.round(change * 100) / 100,
+              changePercent: Math.round(changePercent * 100) / 100,
+              open: quote?.ohlc?.open || 0,
+              high: quote?.ohlc?.high || 0,
+              low: quote?.ohlc?.low || 0,
+              close,
+              volume: quote?.volume || 0,
+              activeSignals: [],
+            };
+          });
+
+          setDynamicItems(items);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load dynamic watchlist:', err);
+    }
+  };
+
+  const loadAll = async () => {
+    await Promise.all([loadCustomWatchlist(), loadDynamicWatchlist()]);
+  };
+
   // Auto reload watchlist on mount, route switch, focus, and every 8s
-  const { lastSynced, isReloading, reload } = useAutoReload(loadWatchlist, { intervalMs: 8000 });
+  const { lastSynced, isReloading, reload } = useAutoReload(loadAll, { intervalMs: 8000 });
+
+  const handleRescreen = async () => {
+    setIsRescreening(true);
+    try {
+      if (window.electronAPI?.watchlist?.rescreen) {
+        await window.electronAPI.watchlist.rescreen();
+      }
+      await loadDynamicWatchlist();
+    } catch (err) {
+      console.error('Failed to re-screen dynamic watchlist:', err);
+    } finally {
+      setIsRescreening(false);
+    }
+  };
 
   // Close search dropdown on click outside
   useEffect(() => {
@@ -150,7 +235,7 @@ const Watchlist: React.FC = () => {
       }
       setSearchQuery('');
       setShowDropdown(false);
-      await loadWatchlist();
+      await loadCustomWatchlist();
     } catch (err) {
       console.error('Failed to add symbol:', err);
     }
@@ -210,19 +295,29 @@ const Watchlist: React.FC = () => {
     }
   };
 
+  const displayedItems = activeTab === 'dynamic' ? dynamicItems : watchlist;
+
+  const formatLastScreenTime = () => {
+    if (!lastScreenerTime) return 'At startup / Initial';
+    const d = new Date(lastScreenerTime * 1000);
+    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) + ' IST';
+  };
+
   return (
-    <div className="p-6 h-full flex flex-col space-y-6">
-      {/* Header & Search Bar */}
+    <div className="p-6 h-full flex flex-col space-y-5">
+      {/* Header & Controls */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            Watchlist
+            Watchlist & In-Play Screener
             <span className="text-xs bg-surface-800 text-surface-400 font-mono px-2 py-0.5 rounded">
-              {watchlist.length} instruments
+              {displayedItems.length} stocks
             </span>
           </h1>
           <p className="text-xs text-surface-400 mt-0.5">
-            Monitor real-time quotes, fast execution, and active intraday candidates
+            {activeTab === 'dynamic'
+              ? 'Algorithmic 30-min screener tracking top momentum, KER efficiency & institutional turnover'
+              : 'Your pinned personal favorites with quick LIMIT entry execution'}
           </p>
         </div>
 
@@ -230,7 +325,7 @@ const Watchlist: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-mono text-surface-400 flex items-center gap-1.5 bg-surface-900/60 px-2.5 py-1.5 rounded-lg border border-surface-800">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Live: {lastSynced}</span>
+              <span>Quotes: {lastSynced}</span>
             </span>
             <button
               onClick={() => reload()}
@@ -242,88 +337,139 @@ const Watchlist: React.FC = () => {
             </button>
           </div>
 
-          {/* Search Input with Auto-complete */}
-          <div ref={searchRef} className="relative w-full sm:w-72">
-            <Search
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-surface-400"
-              size={16}
-            />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && searchQuery.trim()) {
-                  handleAddSymbol(searchQuery.trim());
-                }
-              }}
-              placeholder="Search or add (e.g. INFY)..."
-              className="w-full bg-surface-800 border border-surface-700 rounded-lg pl-9 pr-8 py-2 text-sm text-white placeholder-surface-500 focus:outline-none focus:border-accent-light"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 transform -translate-y-1/2 text-surface-500 hover:text-surface-300"
-              >
-                <X size={14} />
-              </button>
-            )}
+          {activeTab === 'custom' && (
+            <div ref={searchRef} className="relative w-full sm:w-72">
+              <Search
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-surface-400"
+                size={16}
+              />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && searchQuery.trim()) {
+                    handleAddSymbol(searchQuery.trim());
+                  }
+                }}
+                placeholder="Search or add (e.g. INFY)..."
+                className="w-full bg-surface-800 border border-surface-700 rounded-lg pl-9 pr-8 py-2 text-sm text-white placeholder-surface-500 focus:outline-none focus:border-accent-light"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 transform -translate-y-1/2 text-surface-500 hover:text-surface-300"
+                >
+                  <X size={14} />
+                </button>
+              )}
 
-            {/* Dropdown Suggestions */}
-            {showDropdown && searchResults.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1.5 bg-surface-800 border border-surface-700 rounded-lg shadow-xl overflow-hidden z-50">
-                {searchResults.map((item, idx) => {
-                  const sym = item.tradingsymbol || item.symbol || '';
-                  const clean = sym.replace('-EQ', '');
-                  const alreadyInWatchlist = watchlist.some((w) => w.tradingsymbol === clean);
+              {showDropdown && searchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1.5 bg-surface-800 border border-surface-700 rounded-lg shadow-xl overflow-hidden z-50">
+                  {searchResults.map((item, idx) => {
+                    const sym = item.tradingsymbol || item.symbol || '';
+                    const clean = sym.replace('-EQ', '');
+                    const alreadyInWatchlist = watchlist.some((w) => w.tradingsymbol === clean);
 
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => !alreadyInWatchlist && handleAddSymbol(clean)}
-                      className={`px-3 py-2 flex items-center justify-between cursor-pointer border-b border-surface-700/50 last:border-0 ${
-                        alreadyInWatchlist
-                          ? 'opacity-50 cursor-not-allowed bg-surface-900/50'
-                          : 'hover:bg-surface-700/80'
-                      }`}
-                    >
-                      <div>
-                        <div className="text-sm font-semibold text-white">{clean}</div>
-                        <div className="text-xs text-surface-400 truncate max-w-[180px]">
-                          {item.name || item.exchange || 'NSE'}
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => !alreadyInWatchlist && handleAddSymbol(clean)}
+                        className={`px-3 py-2 flex items-center justify-between cursor-pointer border-b border-surface-700/50 last:border-0 ${
+                          alreadyInWatchlist
+                            ? 'opacity-50 cursor-not-allowed bg-surface-900/50'
+                            : 'hover:bg-surface-700/80'
+                        }`}
+                      >
+                        <div>
+                          <div className="text-sm font-semibold text-white">{clean}</div>
+                          <div className="text-xs text-surface-400 truncate max-w-[180px]">
+                            {item.name || item.exchange || 'NSE'}
+                          </div>
                         </div>
+                        {alreadyInWatchlist ? (
+                          <span className="text-[10px] text-surface-500 font-medium">Added</span>
+                        ) : (
+                          <Plus size={14} className="text-accent-light" />
+                        )}
                       </div>
-                      {alreadyInWatchlist ? (
-                        <span className="text-[10px] text-surface-500 font-medium">Added</span>
-                      ) : (
-                        <Plus size={14} className="text-accent-light" />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
+      </div>
+
+      {/* Tabs Switcher & Screener Controls */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-surface-800 pb-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveTab('dynamic')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 cursor-pointer transition-all ${
+              activeTab === 'dynamic'
+                ? 'bg-primary-600 text-white shadow-sm'
+                : 'bg-surface-800 text-surface-400 hover:text-white'
+            }`}
+          >
+            <Zap size={14} className={activeTab === 'dynamic' ? 'text-amber-300' : ''} />
+            <span>Dynamic In-Play Screener ({dynamicItems.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('custom')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 cursor-pointer transition-all ${
+              activeTab === 'custom'
+                ? 'bg-primary-600 text-white shadow-sm'
+                : 'bg-surface-800 text-surface-400 hover:text-white'
+            }`}
+          >
+            <Eye size={14} />
+            <span>Custom Pinned Watchlist ({watchlist.length})</span>
+          </button>
+        </div>
+
+        {activeTab === 'dynamic' && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-surface-400 flex items-center gap-1.5 bg-surface-900 px-3 py-1.5 rounded-lg border border-surface-800">
+              <Clock size={13} className="text-primary-400" />
+              <span>Last Screened: <strong className="text-white font-mono">{formatLastScreenTime()}</strong></span>
+            </span>
+            <button
+              onClick={handleRescreen}
+              disabled={isRescreening}
+              className="px-3 py-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 text-surface-200 hover:text-white text-xs font-semibold border border-surface-700 transition-colors flex items-center gap-1.5 cursor-pointer"
+              title="Force re-screen across entire F&O universe now"
+            >
+              <RefreshCw size={13} className={isRescreening ? 'animate-spin text-primary-400' : ''} />
+              <span>{isRescreening ? 'Screening Universe...' : 'Re-Screen Market Now'}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Grid of Watchlist Items */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 overflow-auto pb-4">
-        {watchlist.length === 0 ? (
+        {displayedItems.length === 0 ? (
           <div className="col-span-full py-16 text-center text-surface-400 border border-dashed border-surface-700 rounded-xl bg-surface-800/30">
-            <Search className="mx-auto text-surface-500 mb-2" size={32} />
-            <p className="font-semibold text-white">Your Watchlist is empty</p>
+            <Activity className="mx-auto text-surface-500 mb-2" size={32} />
+            <p className="font-semibold text-white">
+              {activeTab === 'dynamic' ? 'Dynamic Watchlist is Initializing' : 'Your Custom Watchlist is empty'}
+            </p>
             <p className="text-xs text-surface-500 mt-1">
-              Search for Nifty 50 or custom stocks above to monitor prices and trade.
+              {activeTab === 'dynamic'
+                ? 'Click "Re-Screen Market Now" above to run the institutional screener across 180+ F&O stocks.'
+                : 'Search for stocks above to add them to your custom pinned watchlist.'}
             </p>
           </div>
         ) : (
-          watchlist.map((item) => {
+          displayedItems.map((item, index) => {
             const tick = ticks[item.tradingsymbol] || ticks[`${item.tradingsymbol}-EQ`];
             const price = tick?.lastPrice || item.lastPrice || 0;
             const change = tick?.change || item.change || 0;
             const changePercent = tick?.changePercent || item.changePercent || 0;
             const isPos = changePercent >= 0;
+            const stat = screenerStats[item.tradingsymbol] || {};
 
             return (
               <div
@@ -333,21 +479,52 @@ const Watchlist: React.FC = () => {
                 <div>
                   <div className="flex justify-between items-start mb-2">
                     <div>
-                      <h3 className="font-bold text-base text-white tracking-wide">
-                        {item.tradingsymbol}
-                      </h3>
+                      <div className="flex items-center gap-1.5">
+                        {activeTab === 'dynamic' && (
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-primary-950/60 text-primary-300 border border-primary-800/40">
+                            #{index + 1}
+                          </span>
+                        )}
+                        <h3 className="font-bold text-base text-white tracking-wide">
+                          {item.tradingsymbol}
+                        </h3>
+                      </div>
                       <span className="text-[10px] text-surface-400 uppercase font-mono">NSE • EQ</span>
                     </div>
-                    <button
-                      onClick={() => handleRemoveSymbol(item.tradingsymbol)}
-                      className="text-surface-500 hover:text-loss-light opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-surface-700"
-                      title={`Remove ${item.tradingsymbol}`}
-                    >
-                      <X size={14} />
-                    </button>
+
+                    {activeTab === 'custom' && (
+                      <button
+                        onClick={() => handleRemoveSymbol(item.tradingsymbol)}
+                        className="text-surface-500 hover:text-loss-light opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-surface-700"
+                        title={`Remove ${item.tradingsymbol}`}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
                   </div>
 
-                  <div className="flex items-end justify-between mt-4">
+                  {/* Dynamic Metrics if available */}
+                  {activeTab === 'dynamic' && (stat.ker || stat.rvol || stat.turnover_cr) && (
+                    <div className="flex flex-wrap gap-1 mt-1.5 mb-1">
+                      {stat.ker !== undefined && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-surface-900 text-surface-300 border border-surface-700/60" title="Kaufman Efficiency Ratio">
+                          KER {stat.ker}
+                        </span>
+                      )}
+                      {stat.rvol !== undefined && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-surface-900 text-surface-300 border border-surface-700/60" title="Relative Volume">
+                          RVOL {stat.rvol}x
+                        </span>
+                      )}
+                      {stat.turnover_cr !== undefined && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-surface-900 text-surface-300 border border-surface-700/60" title="Turnover in Crores">
+                          ₹{stat.turnover_cr}Cr
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-end justify-between mt-3">
                     <div className="font-mono text-xl font-bold text-white">
                       {price > 0 ? `₹${price.toFixed(2)}` : '—'}
                     </div>
@@ -366,13 +543,13 @@ const Watchlist: React.FC = () => {
                 <div className="flex gap-2 mt-4 pt-3 border-t border-surface-700/80">
                   <button
                     onClick={() => handleOpenOrder(item.tradingsymbol, 'BUY', price)}
-                    className="flex-1 bg-profit-dark hover:bg-profit py-1.5 rounded-lg text-white text-xs font-bold transition-colors shadow-sm"
+                    className="flex-1 bg-profit-dark hover:bg-profit py-1.5 rounded-lg text-white text-xs font-bold transition-colors shadow-sm cursor-pointer"
                   >
                     BUY
                   </button>
                   <button
                     onClick={() => handleOpenOrder(item.tradingsymbol, 'SELL', price)}
-                    className="flex-1 bg-loss-dark hover:bg-loss py-1.5 rounded-lg text-white text-xs font-bold transition-colors shadow-sm"
+                    className="flex-1 bg-loss-dark hover:bg-loss py-1.5 rounded-lg text-white text-xs font-bold transition-colors shadow-sm cursor-pointer"
                   >
                     SELL
                   </button>

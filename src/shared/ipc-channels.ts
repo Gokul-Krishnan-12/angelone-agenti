@@ -64,6 +64,8 @@ export const WATCHLIST_GET = 'watchlist:get';
 export const WATCHLIST_ADD = 'watchlist:add';
 export const WATCHLIST_REMOVE = 'watchlist:remove';
 export const WATCHLIST_UPDATE = 'watchlist:update'; // Main → Renderer event
+export const WATCHLIST_GET_DYNAMIC = 'watchlist:get-dynamic';
+export const WATCHLIST_RESCREEN = 'watchlist:rescreen';
 
 // ─── App Lifecycle ────────────────────────────────────────────────
 export const APP_READY = 'app:ready';

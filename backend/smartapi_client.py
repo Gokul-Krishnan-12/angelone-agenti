@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -147,6 +148,10 @@ class SmartApiClient:
             cls._instance._cache = {}
             cls._instance._cache_ttl = 3.5
             cls._instance._charges_cache = {}
+            cls._instance._last_candle_fetch_time = 0.0
+            cls._instance._candle_lock = threading.Lock()
+            cls._instance._last_api_request_time = 0.0
+            cls._instance._api_lock = threading.Lock()
             cls._instance._init_token_maps()
         return cls._instance
 
@@ -374,9 +379,28 @@ class SmartApiClient:
             "broken pipe",
         )
 
+        rate_limit_keywords = (
+            "exceeding access rate",
+            "access rate",
+            "rate limit",
+            "too many requests",
+            "429",
+            "access denied because of exceeding",
+        )
+
         max_network_retries = 3
         for attempt in range(max_network_retries):
             try:
+                # Global account-wide request pacer (<= 2.85 req/sec) to eliminate burst 429 rate limit violations
+                api_lock = getattr(self, "_api_lock", None)
+                if api_lock is not None:
+                    with api_lock:
+                        now = time.time()
+                        elapsed = now - getattr(self, "_last_api_request_time", 0.0)
+                        if elapsed < 0.35:
+                            time.sleep(0.35 - elapsed)
+                        self._last_api_request_time = time.time()
+
                 res = api_func(*args, **kwargs)
                 if isinstance(res, dict) and (
                     not res.get("status") or res.get("success") is False
@@ -389,6 +413,18 @@ class SmartApiClient:
                     if any(k in combined for k in auth_keywords):
                         if self.reauthenticate():
                             return api_func(*args, **kwargs)
+                    if any(k in combined for k in rate_limit_keywords):
+                        if attempt < max_network_retries - 1:
+                            backoff = 1.5 * (attempt + 1)
+                            logger.warning(
+                                "SmartAPI rate limit hit (%s). Backing off for %.1fs (attempt %d/%d)...",
+                                combined,
+                                backoff,
+                                attempt + 1,
+                                max_network_retries,
+                            )
+                            time.sleep(backoff)
+                            continue
                 return res
             except Exception as e:
                 err_str = str(e).lower()
@@ -397,7 +433,20 @@ class SmartApiClient:
                     if self.reauthenticate():
                         return api_func(*args, **kwargs)
                     raise
-                # 2. Check for transient network disconnection or read timeout
+                # 2. Check for rate limiting (HTTP 429 / exceeding access rate)
+                if any(k in err_str for k in rate_limit_keywords):
+                    if attempt < max_network_retries - 1:
+                        backoff = 1.5 * (attempt + 1)
+                        logger.warning(
+                            "SmartAPI rate limit hit (%s). Backing off for %.1fs (attempt %d/%d)...",
+                            e,
+                            backoff,
+                            attempt + 1,
+                            max_network_retries,
+                        )
+                        time.sleep(backoff)
+                        continue
+                # 3. Check for transient network disconnection or read timeout
                 if any(k in err_str for k in network_keywords):
                     if attempt < max_network_retries - 1:
                         backoff = 1.0 * (attempt + 1)
@@ -852,9 +901,9 @@ class SmartApiClient:
         is_intraday = product_type.upper() in ("INTRADAY", "MIS")
 
         if is_intraday:
-            # Angel One: Min(0.1%, ₹20) per order
-            buy_brokerage = min(20.0, buy_turnover * 0.001)
-            sell_brokerage = min(20.0, sell_turnover * 0.001)
+            # Angel One: Min(0.1%, ₹20) per order with min ₹5
+            buy_brokerage = max(5.0, min(20.0, buy_turnover * 0.001))
+            sell_brokerage = max(5.0, min(20.0, sell_turnover * 0.001))
             brokerage = round(buy_brokerage + sell_brokerage, 2)
             # STT: 0.025% on sell side only
             stt = round(sell_turnover * 0.00025, 2)
@@ -978,7 +1027,7 @@ class SmartApiClient:
             "exchange": exchange.upper(),
             "ordertype": ord_type,
             "producttype": prod_type,
-            "duration": "DAY",
+            "duration": str(kwargs.get("duration", "DAY")).upper(),
             "price": str(round(float(price), 2)) if price else "0",
             "quantity": str(int(quantity)),
             "triggerprice": str(round(float(trigger_price), 2))
@@ -1062,7 +1111,7 @@ class SmartApiClient:
             "orderid": str(order_id),
             "ordertype": ord_type,
             "producttype": prod_type,
-            "duration": "DAY",
+            "duration": str(kwargs.get("duration", "DAY")).upper(),
             "price": str(price) if price is not None else "0",
             "quantity": str(quantity) if quantity is not None else "1",
             "exchange": exchange,
@@ -1176,6 +1225,17 @@ class SmartApiClient:
             "todate": to_str,
         }
 
+        # Enforce rate-limit pacing on getCandleData (max 3 req/sec -> 0.55s delay)
+        candle_lock = getattr(self, "_candle_lock", None)
+        if candle_lock is not None:
+            with candle_lock:
+                now_t = time.time()
+                last_t = getattr(self, "_last_candle_fetch_time", 0.0)
+                elapsed = now_t - last_t
+                if elapsed < 0.55:
+                    time.sleep(0.55 - elapsed)
+                self._last_candle_fetch_time = time.time()
+
         try:
             res = self._execute_with_auth_retry(
                 self.smart_api.getCandleData, historic_params
@@ -1217,6 +1277,7 @@ class SmartApiClient:
             price_val = 0.0
             if self.smart_api and token:
                 try:
+                    time.sleep(0.35)
                     data = self._execute_with_auth_retry(
                         self.smart_api.ltpData, "NSE", symbol, token
                     )
@@ -1291,6 +1352,7 @@ class SmartApiClient:
                 ltp = 0.0
                 if self.smart_api and token:
                     try:
+                        time.sleep(0.35)
                         ltp_res = self._execute_with_auth_retry(
                             self.smart_api.ltpData, "NSE", symbol, token
                         )

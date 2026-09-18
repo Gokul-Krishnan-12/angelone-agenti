@@ -20,8 +20,8 @@ def _params():
 
 
 def test_registry_has_all_twenty():
-    # 21 original + 4 new high-win-rate strategies = 25 total
-    assert len(STRATEGY_ITEMS) == 25
+    # 21 original + 4 high-win-rate strategies + FRVP = 26 total
+    assert len(STRATEGY_ITEMS) == 26
 
 
 @pytest.mark.parametrize("strategy", _params())

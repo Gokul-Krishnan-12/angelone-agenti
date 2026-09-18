@@ -143,3 +143,57 @@ def test_estimate_charges_client():
     assert "summary" in res
     assert res["summary"]["total_charges"] == 45.8
     assert mock_smart_connect.estimateCharges.called
+
+
+def test_execute_with_rate_limit_backoff_and_retry(monkeypatch):
+    """Verify that rate limit errors (exceeding access rate) trigger backoff and retry."""
+    client = SmartApiClient()
+    call_count = 0
+    sleeps = []
+
+    monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+
+    def mock_api_func():
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception(
+                "Couldn't parse the JSON response received from the server: b'Access denied because of exceeding access rate'"
+            )
+        return {"status": True, "data": [{"net": 1}]}
+
+    res = client._execute_with_auth_retry(mock_api_func)
+    assert call_count == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == 1.5  # 1.5 * attempt
+    assert res["status"] is True
+    assert res["data"][0]["net"] == 1
+
+
+def test_candle_rate_pacing(monkeypatch):
+    """Verify that get_historical_data paces calls by at least 0.35s."""
+    client = SmartApiClient()
+    mock_smart_connect = MagicMock()
+    mock_smart_connect.getCandleData.return_value = {
+        "status": True,
+        "data": [["2025-01-01 09:15", 100, 105, 95, 102, 1000]],
+    }
+    client.smart_api = mock_smart_connect
+
+    sleeps = []
+    monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+
+    # First call initializes the timestamp
+    client.get_historical_data(
+        "1594", "2025-01-01 09:15", "2025-01-01 15:30", "5minute"
+    )
+
+    # Immediately make second call (elapsed ~ 0s)
+    client.get_historical_data(
+        "1594", "2025-01-01 09:15", "2025-01-01 15:30", "5minute"
+    )
+
+    # Verify that sleep was invoked for pacing
+    assert len(sleeps) >= 1
+    assert any(s > 0 for s in sleeps)
+

@@ -12,6 +12,7 @@ class RiskManager:
         self.loss_count = 0
         self.open_positions = 0
         self.daily_trades_count = 0
+        self.current_market_ker: float = 0.0  # latest KER for the symbol being evaluated; 0.0 = unknown (safe block)
 
     def can_trade(self, check_market_hours: bool = True) -> Tuple[bool, str]:
         config = config_manager.get_risk_config()
@@ -198,6 +199,15 @@ class RiskManager:
 
     def set_open_positions(self, count: int):
         self.open_positions = count
+
+    def set_market_ker(self, ker: float) -> None:
+        """Update the latest symbol-level Kaufman Efficiency Ratio for midday chop gating.
+
+        Called by the scanner before each confluence evaluation so that can_trade()
+        uses the stock's own KER (not a global market-wide value) to decide whether
+        the 11:15–13:15 midday block should apply.
+        """
+        self.current_market_ker = float(ker) if ker is not None else 0.0
 
     def get_risk_status(self) -> Dict[str, Any]:
         return {

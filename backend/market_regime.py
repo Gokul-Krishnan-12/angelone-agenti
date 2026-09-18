@@ -14,7 +14,8 @@ choppy market consolidation regimes (the exact cause of Nov 2025 & July 2026 dra
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+import datetime
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -37,6 +38,18 @@ class MarketRegimeResult:
     bb_width_pct: float
     is_squeezed: bool
     summary: str
+
+
+_CURRENT_REGIME: str = "CHOPPY_RANGE"
+
+
+def set_current_market_regime(regime_name: str):
+    global _CURRENT_REGIME
+    _CURRENT_REGIME = regime_name
+
+
+def get_current_market_regime() -> str:
+    return _CURRENT_REGIME
 
 
 def calculate_ker(series: pd.Series, period: int = 20) -> float:
@@ -144,13 +157,7 @@ def classify_market_regime(
     is_squeezed = bb_width_pct < 1.8  # Compressed volatility squeeze
 
     # ── Regime Classification Logic ─────────────────────────────────
-    if adx < min_adx or ker < min_ker or is_squeezed:
-        regime = "CHOPPY_RANGE"
-        summary = (
-            f"Choppy / Squeeze regime (ADX {adx:.1f} < {min_adx} or KER {ker:.2f} < {min_ker}). "
-            "Breakout setups are inhibited."
-        )
-    elif (
+    if (
         curr_close > ema50 and plus_di > minus_di and adx >= min_adx and ker >= min_ker
     ):
         regime = "TRENDING_BULL"
@@ -166,11 +173,19 @@ def classify_market_regime(
             f"Strong Bearish Trend (ADX {adx:.1f}, -DI > +DI, Price < 50 EMA, KER {ker:.2f}). "
             "Favors Short breakdowns and trend continuation."
         )
+    elif adx < min_adx or ker < min_ker or (is_squeezed and adx < 24.0):
+        regime = "CHOPPY_RANGE"
+        summary = (
+            f"Choppy / Squeeze regime (ADX {adx:.1f} < {min_adx} or KER {ker:.2f} < {min_ker}). "
+            "Breakout setups are inhibited."
+        )
     else:
         # Transitional / moderate regime
         regime = "CHOPPY_RANGE" if adx < 22 else "VOLATILE_EXPANSION"
         summary = f"Mixed regime (ADX {adx:.1f}, KER {ker:.2f}). Caution advised on aggressive entries."
 
+
+    set_current_market_regime(regime)
     return MarketRegimeResult(
         regime=regime,
         adx=round(adx, 2),
@@ -246,3 +261,17 @@ def is_trade_allowed_by_regime(
             )
 
     return True, f"Trade permitted under {regime.regime} regime."
+
+
+def is_midday_chop_window(
+    check_time: Optional[datetime.time] = None,
+    chop_start: datetime.time = datetime.time(11, 15),
+    chop_end: datetime.time = datetime.time(13, 15),
+    ker: float = 0.0,
+) -> bool:
+    """
+    Deprecated: Midday window gating has been removed.
+    Returns False unconditionally so trading runs continuously without midday lockouts.
+    """
+    return False
+

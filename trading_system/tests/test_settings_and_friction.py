@@ -38,13 +38,13 @@ def test_statutory_friction_breakdown():
     assert breakdown.total_turnover == 100000.0
     assert breakdown.brokerage == 40.0
     assert breakdown.stt == 12.50  # 0.025% of 50,000
-    assert breakdown.exchange_fee == 3.25  # 0.00325% of 100,000
+    assert breakdown.exchange_fee == 2.97  # 0.00297% of 100,000
     assert breakdown.sebi_charge == 0.10  # 0.0001% of 100,000
     assert breakdown.stamp_duty == 1.50  # 0.003% of 50,000
 
-    # GST on (40.0 + 3.25 + 0.10 = 43.35) * 18% = 7.80
-    assert breakdown.gst == 7.80
-    assert breakdown.total_friction == 65.15
+    # GST on (40.0 + 2.97 + 0.10 = 43.07) * 18% = 7.75
+    assert breakdown.gst == 7.75
+    assert breakdown.total_friction == 64.82
     assert round(breakdown.friction_pct, 3) == 0.065  # ~0.065%
 
 

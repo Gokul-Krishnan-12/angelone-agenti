@@ -42,7 +42,7 @@ def test_strategy_roster_pruning_defaults():
     """Verify that toxic lagging indicators are disabled by default while alpha setups are enabled."""
     strats = config_manager.get_strategy_config()
 
-    # Pruned lagging indicators
+    # Pruned lagging and negative-alpha setups on 5m intraday
     assert strats.get("psar_trend", {}).get("enabled") is False
     assert strats.get("ema_crossover", {}).get("enabled") is False
     assert strats.get("macd_cross", {}).get("enabled") is False
@@ -50,15 +50,16 @@ def test_strategy_roster_pruning_defaults():
     assert strats.get("awesome_oscillator", {}).get("enabled") is False
     assert strats.get("williams_r", {}).get("enabled") is False
     assert strats.get("adx_momentum", {}).get("enabled") is False
+    assert strats.get("order_block_fvg", {}).get("enabled") is False
+    assert strats.get("institutional_absorption", {}).get("enabled") is False
+    assert strats.get("cpr_breakout_reversal", {}).get("enabled") is False
 
-    # High-expectancy breakout & structural setups
+    # High-expectancy breakout & volume alpha setups
     assert strats.get("donchian_breakout", {}).get("enabled") is True
     assert strats.get("keltner_breakout", {}).get("enabled") is True
     assert strats.get("bollinger_breakout", {}).get("enabled") is True
-    assert strats.get("order_block_fvg", {}).get("enabled") is True
-    assert strats.get("institutional_absorption", {}).get("enabled") is True
     assert strats.get("volume_delta_divergence", {}).get("enabled") is True
-    assert strats.get("cpr_breakout_reversal", {}).get("enabled") is True
+    assert strats.get("cmf_accumulation", {}).get("enabled") is True
 
 
 def test_active_trades_disk_persistence(tmp_path, monkeypatch):
@@ -155,7 +156,7 @@ def test_pending_orders_promotion_on_fill(monkeypatch):
 
 
 def test_pending_orders_timeout_cancellation(monkeypatch):
-    """Test that unfilled orders older than 60 seconds are cancelled and purged."""
+    """Test that unfilled orders older than 20 seconds are cancelled and purged, while fresh ones remain."""
     engine = TradingEngine()
     engine.pending_orders = {
         "TIMEOUT_ORDER": {
@@ -169,23 +170,38 @@ def test_pending_orders_timeout_cancellation(monkeypatch):
             "target": 1850.0,
             "original_strategy": "keltner_breakout",
             "atr": 15.0,
-            "submitted_at": time.time() - 75,  # 75s ago
-        }
+            "submitted_at": time.time() - 25,  # 25s ago (> 20s default)
+        },
+        "FRESH_ORDER": {
+            "order_id": "FRESH_ORDER",
+            "tradingsymbol": "TCS",
+            "exchange": "NSE",
+            "direction": "BUY",
+            "quantity": 10,
+            "entry_price": 3800.0,
+            "stop_loss": 3760.0,
+            "target": 3880.0,
+            "original_strategy": "donchian_breakout",
+            "atr": 25.0,
+            "submitted_at": time.time() - 8,  # 8s ago (< 20s default)
+        },
     }
 
     mock_client = MagicMock()
     mock_client.get_orders.return_value = [
-        {"orderId": "TIMEOUT_ORDER", "status": "PENDING"}
+        {"orderId": "TIMEOUT_ORDER", "status": "PENDING"},
+        {"orderId": "FRESH_ORDER", "status": "PENDING"},
     ]
     monkeypatch.setattr("backend.trading_engine.smart_api_client", mock_client)
 
     engine.monitor_pending_orders()
 
-    # Must call cancel_order and purge from pending_orders
-    mock_client.cancel_order.assert_called_with(
+    # Must call cancel_order for TIMEOUT_ORDER only
+    mock_client.cancel_order.assert_called_once_with(
         variety="NORMAL", order_id="TIMEOUT_ORDER"
     )
     assert "TIMEOUT_ORDER" not in engine.pending_orders
+    assert "FRESH_ORDER" in engine.pending_orders
 
 
 def test_exchange_sl_modified_on_trailing_sl(monkeypatch):
@@ -201,6 +217,7 @@ def test_exchange_sl_modified_on_trailing_sl(monkeypatch):
             "atr": 20.0,
             "high_water_mark": 3000.0,
             "low_water_mark": 2950.0,
+            "partial_booked": True,
         }
     }
 

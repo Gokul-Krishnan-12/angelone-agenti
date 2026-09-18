@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTradingStore } from '../stores/trading-store';
+import { usePaperTradingStore } from '../stores/paper-trading-store';
 import { SETTINGS_SAVE, TELEGRAM_TEST } from '@shared/ipc-channels';
 import { Shield, ShieldCheck, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle, Send } from 'lucide-react';
 
@@ -116,6 +117,18 @@ const Settings: React.FC = () => {
       };
       setLocalSettings(settingsToSave);
       setSettings(settingsToSave);
+
+      // Keep Paper Trading synchronized with Saved Settings
+      if (cleanedRisk.riskPerTrade) {
+        usePaperTradingStore.getState().setRiskPerTrade(Number(cleanedRisk.riskPerTrade));
+      }
+      if (cleanedRisk.maxCapitalPerTrade) {
+        usePaperTradingStore.getState().setMaxCapitalPerTrade(Number(cleanedRisk.maxCapitalPerTrade));
+      }
+      if (cleanedRisk.maxDailyTrades) {
+        usePaperTradingStore.getState().setMaxDailyTrades(Number(cleanedRisk.maxDailyTrades));
+      }
+
       await window.electronAPI?.invoke(SETTINGS_SAVE, settingsToSave);
       setSaveStatus('Saved successfully!');
       setTimeout(() => setSaveStatus(''), 3000);

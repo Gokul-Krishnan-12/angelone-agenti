@@ -15,10 +15,10 @@ class ConfigManager:
 
         self.default_config = {
             "risk": {
-                "maxCapitalPerTrade": 4000,
-                "riskPerTrade": 500.0,  # 1R risk budget per trade in INR
+                "maxCapitalPerTrade": 8000,
+                "riskPerTrade": 700.0,  # 1R risk budget per trade in INR (scaled with capital to dilute friction)
                 "riskPercent": 1.0,  # 1.0% of portfolio equity risk per trade
-                "maxDailyLoss": 800,
+                "maxDailyLoss": 2000,  # raised from ₹800 → prevents premature engine shutdown after 1-2 SLs
                 "maxSimultaneousPositions": 4,
                 "maxDailyTrades": 8,
                 "noNewTradesAfter": "15:00",
@@ -27,13 +27,15 @@ class ConfigManager:
                 "defaultStopLossPercent": 1.2,
                 "defaultTargetPercent": 2.4,  # exact 1:2 R:R against 1.2% stop-loss
                 "positionRevalWeakExitMins": 15,
-                "positionRevalBreakevenMins": 45,
+                "positionRevalBreakevenMins": 20,  # idle trade circuit breaker stagnation timeout (20 mins)
                 # ── Quality filters ──────────────────────────────────
-                "minConfluenceScore": 3,  # 3 independent families required for high-conviction trades
+                "minConfluenceScore": 3,  # 3 independent families required for CHOPPY_RANGE regime
+                "minConfluenceScoreTrending": 2,  # 2 families allowed in TRENDING_BULL/TRENDING_BEAR regimes
                 "minRiskReward": 2.0,  # minimum 1:2 R:R ratio for any trade
                 "minStopLossPercent": 1.0,  # minimum 1.0% SL width to prevent noise stop-outs
                 "trendAlignmentFilter": True,  # trade only in direction of 50-period EMA
                 "noEntryFirstMins": 15,  # skip first 15 min (9:15–9:30 opening chaos)
+                "pendingOrderTimeoutSeconds": 15,  # unexecuted limit cancellation window (15s to prevent stale fills on fading moves)
                 # ── Market Regime Filter ──────────────────────────
                 "marketRegimeFilterEnabled": True,  # quantitative regime & volatility filter
                 "marketRegimeMinADX": 20.0,  # trend strength threshold
@@ -41,33 +43,39 @@ class ConfigManager:
                 "marketRegimeBlockChoppyBreakouts": True,  # suppress false-breakout churn in chop
                 # ── Trailing stop-loss ────────────────────────────
                 "trailingSlEnabled": True,  # enable ATR trailing SL
-                "trailingSlAtrMultiplier": 2.0,  # trail 2.0 × ATR behind high-water mark
-                "trailingSlProfitCushionR": 1.0,  # trail only after reaching +1.0R profit
+                "trailingSlAtrMultiplier": 2.2,  # ATR multiplier for trailing distance
+                "trailingSlProfitCushionR": 1.5,  # trail only after reaching +1.5R profit (prevents premature choking)
                 # ── Partial Profit Booking ────────────────────────
                 "partialBookingEnabled": True,  # book 50% at Target 1 and move SL to breakeven
                 "partialBookingRatio": 0.5,  # 50% quantity exit at Target 1
                 "partialBookingMinProfit": 250.0,  # minimum ₹250 gain to justify extra ₹20 brokerage order
-                "partialBookingTargetRR": 2.0,  # default Target 1 at 1:2 R:R
+                "partialBookingTargetRR": 1.2,  # front-load Target 1 at +1.2R (covers round-trip friction)
+                # ── 2-Leg Scale-In Entry ─────────────────────────
+                "scaleInEnabled": True,  # 50% qty at breakout, 50% on EMA20/VWAP pullback → improves avg entry
+                "scaleInLeg1Ratio": 0.5,  # fraction of calculated qty placed as Leg 1
+                "scaleInLeg2TimeoutMultiplier": 2,  # Leg 2 waits 2× pendingOrderTimeoutSeconds before being skipped
             },
             "strategies": {
                 # ── Top alpha strategies: breakout, structure, volume ──
                 "donchian_breakout": {"enabled": True},
                 "keltner_breakout": {"enabled": True},
-                "order_block_fvg": {"enabled": True},
                 "bollinger_breakout": {"enabled": True},
-                "institutional_absorption": {"enabled": True},
                 "volume_delta_divergence": {"enabled": True},
                 "cmf_accumulation": {"enabled": True},
-                "cpr_breakout_reversal": {"enabled": True},
-                "opening_range_breakout": {"enabled": True},
                 "liquidity_grab_reversal": {"enabled": True},
                 "gap_fill": {"enabled": True},
+                "fixed_range_volume_profile": {"enabled": True},
+                # ── Negative alpha on 5m intraday ──
+                "institutional_absorption": {"enabled": False},  # -₹3,226 drag on 5m
+                "cpr_breakout_reversal": {"enabled": False},  # Whipsaws on 5m rolling windows
+                "order_block_fvg": {"enabled": False},  # Whipsaw prone on 5m
+                "opening_range_breakout": {"enabled": False},  # False breakout chop in opening 15m
                 # ── Pruned lagging indicators & negative expectancy oscillators ──
                 "psar_trend": {"enabled": False},  # -₹8,575 P&L in backtests
                 "ema_crossover": {"enabled": False},  # -₹2,201 P&L in backtests
                 "macd_cross": {"enabled": False},  # Flat/negative fee drag
                 "supertrend": {"enabled": False},  # Whipsaw prone on 15m
-                "tsi_cross": {"enabled": False},
+                "tsi_cross": {"enabled": True},  # consistent positive alpha: +₹5,575/+₹7,967 across backtests
                 "awesome_oscillator": {"enabled": False},
                 "stoc_rsi": {"enabled": False},
                 "stochastic_reversal": {"enabled": False},

@@ -145,6 +145,17 @@ const STRATEGIES_LIST: StrategyItem[] = [
     indicators: 'Cumulative Volume Delta (CVD proxy), Swing Extremes',
     whyItWorks: 'Pinpoints institutional absorption where passive limit orders soak up aggressive market orders before a sharp trend turn.'
   },
+  {
+    id: 'fixed_range_volume_profile',
+    name: 'Fixed Range Volume Profile (FRVP)',
+    category: 'Volume Profile',
+    family: 'Structure',
+    winRateOrRank: 'Institutional Magnet (~66% Win Rate)',
+    rrRatio: '1 : 2.2',
+    triggerRules: 'Bins volume into price nodes across the session range. Identifies Point of Control (POC), Value Area High (VAH), and Value Area Low (VAL). Triggers on high-volume bounces or breakout retests off the POC.',
+    indicators: 'Volume Profile POC, Value Area (70% volume distribution), 20 EMA',
+    whyItWorks: 'The Point of Control (POC) represents the price level where the highest volume was transacted by institutional market makers, acting as a powerful support/resistance level.'
+  },
 
   // ── 4. Reversal Family (2) ──────────────────────────────────────────
   {
@@ -585,8 +596,8 @@ const SystemGuide: React.FC = () => {
                 {
                   step: '05',
                   title: 'Limit Queue & Timeout',
-                  desc: 'Places smart limit entry with a 60-second timeout queue. Unfilled orders are cancelled automatically to prevent stale fills on fast moves.',
-                  badge: '60s Timeout Queue'
+                  desc: 'Places smart limit entry with a 20-second timeout queue. Unfilled orders are cancelled automatically to prevent stale fills on fast moves.',
+                  badge: '20s Timeout Queue'
                 },
                 {
                   step: '06',
@@ -656,18 +667,18 @@ const SystemGuide: React.FC = () => {
                 </div>
               </div>
 
-              {/* Safeguard 2: 60s Pending Limit Queue */}
+              {/* Safeguard 2: 20s Pending Limit Queue */}
               <div className="p-4 rounded-xl bg-surface-900/80 border border-surface-700/80 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <Timer size={14} className="text-warning-light" /> 60s Limit Queue
+                    <Timer size={14} className="text-warning-light" /> 20s Limit Queue
                   </span>
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-800 text-warning-light border border-surface-700">
-                    TTL 60 Seconds
+                    TTL 20 Seconds
                   </span>
                 </div>
                 <p className="text-xs text-surface-300 leading-relaxed">
-                  Breakout entries are placed as Limit orders near the bid/ask spread. The engine tracks unfilled orders in an active timeout queue. If unfilled after <strong>60 seconds</strong>, the order is automatically cancelled to prevent adverse fills on fading momentum.
+                  Breakout entries are placed as Limit orders near the bid/ask spread. The engine tracks unfilled orders in an active timeout queue. If unfilled after <strong>20 seconds</strong>, the order is automatically cancelled to prevent adverse fills on fading momentum.
                 </p>
                 <div className="text-[10px] text-surface-500 font-mono pt-1">
                   Anti-Lag: Eliminates stale resting orders during market reversals.
@@ -791,23 +802,23 @@ const SystemGuide: React.FC = () => {
               </div>
 
               {/* Window 3 */}
-              <div className="p-4 rounded-xl bg-surface-900/80 border border-warning-light/20 flex flex-col justify-between">
+              <div className="p-4 rounded-xl bg-surface-900/80 border border-profit-light/20 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono font-bold text-warning-light bg-warning-light/10 px-2.5 py-1 rounded border border-warning-light/20">
-                      11:45 AM – 01:00 PM
+                    <span className="text-xs font-mono font-bold text-profit-light bg-profit-light/10 px-2.5 py-1 rounded border border-profit-light/20">
+                      11:30 AM – 01:00 PM
                     </span>
-                    <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-warning-light/10 text-warning-light border border-warning-light/20 flex items-center gap-1">
-                      <Clock size={10} /> Paused
+                    <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-profit-light/10 text-profit-light border border-profit-light/20 flex items-center gap-1">
+                      <Flame size={10} /> Active
                     </span>
                   </div>
-                  <h4 className="font-bold text-white text-sm mt-2">Midday Lull &amp; Lunch Consolidation</h4>
+                  <h4 className="font-bold text-white text-sm mt-2">Continuous Midday Trading</h4>
                   <p className="text-xs text-surface-400 mt-1 leading-relaxed">
-                    Market turnover drops across domestic equities. New entries are restricted to avoid getting caught in low-volume sideways consolidation chop.
+                    Arbitrary midday lockouts have been removed. Trading runs continuously from 09:30 AM to 03:00 PM. Technical confluence, regime filters, and 1:2 R:R geometry protect every trade without artificial time blocks.
                   </p>
                 </div>
                 <div className="mt-3 pt-3 border-t border-surface-800 text-[11px] text-surface-500 font-mono">
-                  Gate: Existing trades managed; new entries paused
+                  Gate: Active (Multi-family confluence &amp; regime protected)
                 </div>
               </div>
 
@@ -1055,7 +1066,7 @@ const SystemGuide: React.FC = () => {
               </div>
               <div className="p-2.5 rounded-xl bg-surface-800/80 border border-profit-light/20 text-surface-300">
                 <span className="font-bold text-profit-light block mb-1">Active High-Conviction Core:</span>
-                <span className="text-[11px] text-surface-400">Donchian Breakout, Keltner Channel Breakout, Bollinger Squeeze, Institutional Absorption, Fair Value Gap (FVG), Volume Delta Divergence, CMF Accumulation, Opening Range Breakout (ORB).</span>
+                <span className="text-[11px] text-surface-400">Donchian Breakout, Keltner Channel Breakout, Bollinger Squeeze, Institutional Absorption, Fair Value Gap (FVG), Volume Delta Divergence, CMF Accumulation, Opening Range Breakout (ORB), <strong>True Strength Index (TSI)</strong> — re-enabled after showing +₹7,967 net P&amp;L in backtests.</span>
               </div>
             </div>
           </div>
@@ -1233,12 +1244,12 @@ const SystemGuide: React.FC = () => {
                 </p>
               </div>
               <span className="text-xs font-mono px-3 py-1 rounded-full bg-accent-light/10 text-accent-light border border-accent-light/30">
-                Confluence: ≥ 3 Distinct Families
+                Confluence: ≥ 3 (Chop) / ≥ 2 (Trending)
               </span>
             </div>
 
             <p className="text-sm text-surface-300 leading-relaxed">
-              A single technical indicator firing is statistically insufficient to overcome exchange friction and slippage. The platform groups all 25 strategies into eight independent indicator families. An order is approved <strong>only when ≥ 3 distinct families agree on the same direction</strong>, align with the 50-period EMA macro trend, and pass the Market Regime Filter.
+              A single technical indicator firing is statistically insufficient to overcome exchange friction and slippage. The platform groups all 25 strategies into eight independent indicator families. In <strong>CHOPPY_RANGE</strong> or unknown regime, an order is approved <strong>only when ≥ 3 distinct families agree</strong> on the same direction. In a confirmed <strong>TRENDING_BULL or TRENDING_BEAR</strong> regime (ADX ≥ 20, KER ≥ 0.35), the threshold relaxes to <strong>≥ 2 families</strong> — allowing clean breakout + volume confirmations to fire without requiring a third oscillator vote. All trades must align with the 50-period EMA macro trend and pass the Market Regime Filter.
             </p>
 
             {/* Market Regime Engine Card */}
@@ -2039,7 +2050,7 @@ const SystemGuide: React.FC = () => {
                     {
                       dim: 'Pending Order Management',
                       paper: 'Immediate virtual execution at incoming tick price',
-                      live: '60-Second Timeout Queue: Unfilled limit orders are auto-cancelled after 60s to prevent stale fills'
+                      live: '20-Second Timeout Queue: Unfilled limit orders are auto-cancelled after 20s to prevent stale fills'
                     },
                     {
                       dim: 'Dynamic Trailing & Partial Booking',

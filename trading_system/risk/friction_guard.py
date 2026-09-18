@@ -72,7 +72,7 @@ class FrictionGuard:
         # 2. STT: 0.025% on sell-side turnover (equity intraday)
         stt = round(sell_turnover * s.stt_rate_sell, 2)
 
-        # 3. NSE Exchange Turnover Fee: 0.00325% on both buy & sell
+        # 3. NSE Exchange Turnover Fee: 0.00297% on both buy & sell (SEBI True-to-Label)
         exchange_fee = round(total_turnover * s.exchange_turnover_rate, 2)
 
         # 4. SEBI Turnover Charge: ₹10 per crore (0.0001%) on both buy & sell
