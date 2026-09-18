@@ -91,7 +91,7 @@ interface PaperTradingState {
   addLog: (type: PaperLogEntry['type'], message: string) => void;
 }
 
-export const isIndianMarketHours = (): boolean => {
+export const isIndianMarketHours = (forNewEntries: boolean = true): boolean => {
   const now = new Date();
   const istString = now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
   const istDate = new Date(istString);
@@ -103,10 +103,12 @@ export const isIndianMarketHours = (): boolean => {
   const minutes = istDate.getMinutes();
   const timeInMinutes = hours * 60 + minutes;
 
-  const marketOpen = 9 * 60 + 15; // 09:15 IST
-  const intradayCutoff = 15 * 60 + 15; // 15:15 IST (No intraday entries after 3:15 PM)
+  // 09:30 IST for new entries (skip first 15 mins opening chop), 09:15 for general session
+  const marketOpen = forNewEntries ? (9 * 60 + 30) : (9 * 60 + 15);
+  // 15:00 IST cutoff for new entries, 15:15 IST cutoff for intraday tracking
+  const marketClose = forNewEntries ? (15 * 60) : (15 * 60 + 15);
 
-  return timeInMinutes >= marketOpen && timeInMinutes <= intradayCutoff;
+  return timeInMinutes >= marketOpen && timeInMinutes <= marketClose;
 };
 
 export const usePaperTradingStore = create<PaperTradingState>()(
@@ -127,9 +129,9 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           message: 'Paper Trading sandbox initialized. Real-market simulation with zero financial risk.'
         }
       ],
-      maxCapitalPerTrade: 4000,
-      maxDailyTrades: 8,
-      riskPerTrade: 500,
+      maxCapitalPerTrade: 8000,
+      maxDailyTrades: 4,
+      riskPerTrade: 700,
 
       setDummyBalance: (amount: number) => {
         const valid = Math.max(1000, Number(amount) || 100000);
@@ -325,18 +327,14 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           return false;
         }
 
-        // Calculate Target 1 (1:2 R:R) & Target 2 for partial profit booking on asymmetric setups
+        // Calculate Target 1 (+1.0R) & Target 2 for front-loaded partial profit booking
         const riskDist = Math.abs(entryPrice - stopLoss);
-        const rewardDist = Math.abs(target - entryPrice);
-        const rrRatio = riskDist > 0 ? rewardDist / riskDist : 0;
-
         let target1: number | undefined;
         const target2 = target;
-        // If high R:R (> 2.2), set Target 1 at 1:2 R:R and Target 2 at full target
-        if (rrRatio > 2.2 && riskDist > 0) {
+        if (riskDist > 0) {
           target1 = direction === 'BUY'
-            ? Math.round((entryPrice + riskDist * 2.0) * 100) / 100
-            : Math.round((entryPrice - riskDist * 2.0) * 100) / 100;
+            ? Math.round((entryPrice + riskDist * 1.0) * 100) / 100
+            : Math.round((entryPrice - riskDist * 1.0) * 100) / 100;
         }
 
         const newPosition: PaperPosition = {
@@ -424,7 +422,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 
           let currentPos = { ...pos };
 
-          // ── Check Target 1 (Partial Profit Booking) ───────────
+          // ── Check Target 1 (+1.2R Partial Profit Booking) ───────────
           if (currentPos.target1 && !currentPos.partialBooked && currentPos.quantity >= 2) {
             const hitTarget1 = isBuy
               ? effectivePrice >= currentPos.target1
@@ -436,24 +434,28 @@ export const usePaperTradingStore = create<PaperTradingState>()(
                 ? (effectivePrice - currentPos.entryPrice) * exitQty
                 : (currentPos.entryPrice - effectivePrice) * exitQty;
 
-              // Brokerage safeguard: ensure partial profit >= ₹250 to justify extra transaction
-              if (partialPnl >= 250 && exitQty >= 1) {
+              if (exitQty >= 1) {
                 const releasedMargin = (exitQty * currentPos.entryPrice) / 5;
                 balanceDelta += releasedMargin + partialPnl;
 
                 const remainingQty = currentPos.quantity - exitQty;
+                // Move SL to Breakeven (+0.05% friction cushion)
+                const beSl = isBuy
+                  ? Math.round(currentPos.entryPrice * 1.0005 * 100) / 100
+                  : Math.round(currentPos.entryPrice * 0.9995 * 100) / 100;
+
                 currentPos = {
                   ...currentPos,
                   quantity: remainingQty,
                   marginUsed: Math.max(0, currentPos.marginUsed - releasedMargin),
-                  stopLoss: currentPos.entryPrice, // Move SL to Breakeven!
+                  stopLoss: beSl, // Move SL to Breakeven!
                   target: currentPos.target2 || currentPos.target,
                   partialBooked: true
                 };
 
                 logsToAdd.push({
                   type: 'TARGET',
-                  message: `🎯 PARTIAL TARGET 1 HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}! Booked 50% (${exitQty} shares, +₹${partialPnl.toFixed(2)}). SL moved to Breakeven @ ₹${currentPos.entryPrice.toFixed(2)}.`
+                  message: `🎯 PARTIAL TARGET 1 (+1.2R) HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}! Booked 50% (${exitQty} shares, +₹${partialPnl.toFixed(2)}). SL moved to Breakeven @ ₹${beSl.toFixed(2)}.`
                 });
               }
             }

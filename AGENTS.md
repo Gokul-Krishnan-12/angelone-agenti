@@ -252,12 +252,13 @@ Each signal family counts as **exactly ONE vote** in the confluence score, regar
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                             8 SIGNAL FAMILIES                              │
 ├──────────────┬─────────────────────────────────────────────────────────────┤
-│ 1. Breakout  │ donchian_breakout, keltner_breakout, bollinger_breakout     │
+│ 1. Breakout  │ donchian_breakout, keltner_breakout, bollinger_breakout,    │
+│              │ opening_range_breakout                                      │
 │ 2. Structure │ institutional_absorption, order_block_fvg,                  │
 │              │ volume_delta_divergence, cpr_breakout_reversal,             │
 │              │ fixed_range_volume_profile (POC/VAH/VAL)                    │
 │ 3. Volume    │ cmf_accumulation                                            │
-│ 4. Intraday  │ vwap_bounce, opening_range_breakout                         │
+│ 4. Intraday  │ vwap_bounce                                                 │
 │ 5. Reversal  │ liquidity_grab_reversal, gap_fill                           │
 │ 6. Trend     │ ema_crossover, supertrend, psar_trend, adx_momentum         │
 │ 7. Momentum  │ macd_cross, rsi_reversal, tsi_cross                         │
@@ -268,14 +269,14 @@ Each signal family counts as **exactly ONE vote** in the confluence score, regar
 
 ### 6.2 Pre-Trade Gating Pipeline
 Every candidate signal must clear the following sequentially:
-1. **Market Hours Window**: No entries in opening chaos (09:15–09:30 IST); entries allowed 09:30–11:45 IST and 13:00–15:00 IST.
+1. **Market Hours Window**: No entries in opening chaos (09:15–09:30 IST); continuous intraday entries allowed until 15:00 IST.
 2. **Trend Alignment Gate**:
    - `BUY` signals require $\text{Close} \ge 50\text{ EMA}$.
    - `SELL` signals require $\text{Close} \le 50\text{ EMA}$.
-3. **Adaptive Confluence Gate**: In `TRENDING_BULL`/`TRENDING_BEAR` regime, $\text{Confluence Score} \ge 2$ (breakout/trend family + volume/momentum family). In `CHOPPY_RANGE` or unknown regime, $\text{Confluence Score} \ge 3$ independent signal families.
-4. **Market Regime Gate**: `is_trade_allowed_by_regime()` verifies current symbol regime.
-5. **Stop-Loss Minimum Floor**: Enforces a minimum $1.0\%$ stop-loss width to prevent noise stop-outs.
-6. **1:2 R:R Geometry Target**: Targets are recalculated to guarantee at least $1:2$ Risk-to-Reward ratio against the widened SL buffer.
+3. **Adaptive Confluence Gate**: $\text{Confluence Score} \ge 3$ independent signal families across all regimes.
+4. **Market Regime Gate**: `is_trade_allowed_by_regime()` verifies current symbol regime. In `CHOPPY_RANGE`, all Breakout and Trend continuation setups are strictly inhibited.
+5. **Stop-Loss Floor & Cap**: Enforces a minimum $1.0\%$ stop-loss width to prevent noise stop-outs, and a maximum $1.8\%$ stop-loss cap to prevent outsized tail-risk losses.
+6. **1:2 R:R Geometry Target**: Targets are recalculated to guarantee at least $1:2$ Risk-to-Reward ratio against the calibrated SL buffer.
 
 ### 6.3 Active Alpha Strategies vs Pruned Strategies
 Based on walk-forward backtest analysis under Indian statutory friction:
@@ -308,7 +309,7 @@ $$\text{Max Allowed Quantity} = \left\lfloor \frac{\text{Max Capital (default �
 $$\text{Quantity} = \max(1, \min(\text{Raw Quantity}, \text{Max Allowed Quantity}))$$
 
 ### 7.2 Portfolio Circuit Breakers
-- **Daily Trade Limit**: Maximum **8 trades per day** (prevents overtrading and fee churn).
+- **Daily Trade Limit**: Maximum **4 trades per day** (prevents overtrading and fee churn).
 - **Max Daily Loss**: **₹800** (triggers immediate square-off and halts new entries).
 - **Max Simultaneous Positions**: **4 positions**.
 - **No New Trades After**: **15:00 IST**.

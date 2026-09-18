@@ -413,7 +413,7 @@ class SmartApiClient:
                     if any(k in combined for k in auth_keywords):
                         if self.reauthenticate():
                             return api_func(*args, **kwargs)
-                    if any(k in combined for k in rate_limit_keywords):
+                    if any(k in combined for k in rate_limit_keywords) or err_code == "AB1021":
                         if attempt < max_network_retries - 1:
                             backoff = 1.5 * (attempt + 1)
                             logger.warning(
@@ -433,13 +433,13 @@ class SmartApiClient:
                     if self.reauthenticate():
                         return api_func(*args, **kwargs)
                     raise
-                # 2. Check for rate limiting (HTTP 429 / exceeding access rate)
-                if any(k in err_str for k in rate_limit_keywords):
+                # 2. Check for rate limiting (HTTP 429 / exceeding access rate / AB1021)
+                if any(k in err_str for k in rate_limit_keywords) or "ab1021" in err_str:
                     if attempt < max_network_retries - 1:
                         backoff = 1.5 * (attempt + 1)
                         logger.warning(
                             "SmartAPI rate limit hit (%s). Backing off for %.1fs (attempt %d/%d)...",
-                            e,
+                            err_str,
                             backoff,
                             attempt + 1,
                             max_network_retries,
@@ -1225,16 +1225,18 @@ class SmartApiClient:
             "todate": to_str,
         }
 
-        # Enforce rate-limit pacing on getCandleData (max 3 req/sec -> 0.55s delay)
+        # Enforce rate-limit pacing on getCandleData (strictly >= 0.60s gap, < 2.0 req/sec)
         candle_lock = getattr(self, "_candle_lock", None)
         if candle_lock is not None:
             with candle_lock:
                 now_t = time.time()
                 last_t = getattr(self, "_last_candle_fetch_time", 0.0)
-                elapsed = now_t - last_t
-                if elapsed < 0.55:
-                    time.sleep(0.55 - elapsed)
-                self._last_candle_fetch_time = time.time()
+                # Next allowed request timestamp must be at least 0.60s after previous scheduled request
+                target_t = max(now_t, last_t + 0.60)
+                delay = target_t - now_t
+                self._last_candle_fetch_time = target_t
+                if delay > 0:
+                    time.sleep(delay)
 
         try:
             res = self._execute_with_auth_retry(
@@ -1268,7 +1270,33 @@ class SmartApiClient:
             return []
 
     def get_ltp(self, instruments: List[str]) -> Dict[str, Any]:
-        """Fetch LTP for given instruments ['NSE:RELIANCE', 'SBIN', ...]."""
+        """Fetch LTP for given instruments ['NSE:RELIANCE', 'SBIN', ...].
+        Optimized with get_quote batch fetching to prevent slow sequential round-trips.
+        """
+        if not instruments:
+            return {}
+
+        # If more than 2 instruments requested, use get_quote batch fetching for high throughput
+        if len(instruments) > 2 and self.smart_api:
+            try:
+                quotes = self.get_quote(instruments)
+                if quotes:
+                    res_map = {}
+                    for inst in instruments:
+                        clean = inst.replace("NSE:", "").replace("-EQ", "").upper()
+                        quote_val = quotes.get(inst) or quotes.get(clean) or {}
+                        price = float(quote_val.get("last_price", 0.0) or 0.0)
+                        entry = {
+                            "last_price": price,
+                            "lastPrice": price,
+                            "ltp": price,
+                        }
+                        res_map[inst] = entry
+                        res_map[clean] = entry
+                    return res_map
+            except Exception as e:
+                logger.warning("Batch LTP fetch fallback to individual: %s", e)
+
         res_map = {}
         for inst in instruments:
             clean = inst.replace("NSE:", "").replace("-EQ", "").upper()

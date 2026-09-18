@@ -20,7 +20,7 @@ class ConfigManager:
                 "riskPercent": 1.0,  # 1.0% of portfolio equity risk per trade
                 "maxDailyLoss": 2000,  # raised from ₹800 → prevents premature engine shutdown after 1-2 SLs
                 "maxSimultaneousPositions": 4,
-                "maxDailyTrades": 8,
+                "maxDailyTrades": 4,
                 "noNewTradesAfter": "15:00",
                 "autoSquareOff": True,
                 "squareOffTime": "15:15",
@@ -29,10 +29,11 @@ class ConfigManager:
                 "positionRevalWeakExitMins": 15,
                 "positionRevalBreakevenMins": 20,  # idle trade circuit breaker stagnation timeout (20 mins)
                 # ── Quality filters ──────────────────────────────────
-                "minConfluenceScore": 3,  # 3 independent families required for CHOPPY_RANGE regime
-                "minConfluenceScoreTrending": 2,  # 2 families allowed in TRENDING_BULL/TRENDING_BEAR regimes
+                "minConfluenceScore": 3,  # 3 independent families required for all regimes
+                "minConfluenceScoreTrending": 3,  # raised to 3 families in all regimes (trending & choppy)
                 "minRiskReward": 2.0,  # minimum 1:2 R:R ratio for any trade
-                "minStopLossPercent": 1.0,  # minimum 1.0% SL width to prevent noise stop-outs
+                "minStopLossPercent": 1.2,  # minimum 1.2% SL width to prevent noise stop-outs
+                "maxStopLossPercent": 2.4,  # maximum 2.4% SL cap to prevent outsized losses
                 "trendAlignmentFilter": True,  # trade only in direction of 50-period EMA
                 "noEntryFirstMins": 15,  # skip first 15 min (9:15–9:30 opening chaos)
                 "pendingOrderTimeoutSeconds": 15,  # unexecuted limit cancellation window (15s to prevent stale fills on fading moves)
@@ -44,12 +45,12 @@ class ConfigManager:
                 # ── Trailing stop-loss ────────────────────────────
                 "trailingSlEnabled": True,  # enable ATR trailing SL
                 "trailingSlAtrMultiplier": 2.2,  # ATR multiplier for trailing distance
-                "trailingSlProfitCushionR": 1.5,  # trail only after reaching +1.5R profit (prevents premature choking)
+                "trailingSlProfitCushionR": 1.0,  # trail after reaching +1.0R profit (prevents premature choking)
                 # ── Partial Profit Booking ────────────────────────
                 "partialBookingEnabled": True,  # book 50% at Target 1 and move SL to breakeven
                 "partialBookingRatio": 0.5,  # 50% quantity exit at Target 1
                 "partialBookingMinProfit": 250.0,  # minimum ₹250 gain to justify extra ₹20 brokerage order
-                "partialBookingTargetRR": 1.2,  # front-load Target 1 at +1.2R (covers round-trip friction)
+                "partialBookingTargetRR": 1.0,  # front-load Target 1 at +1.0R (covers round-trip friction)
                 # ── 2-Leg Scale-In Entry ─────────────────────────
                 "scaleInEnabled": True,  # 50% qty at breakout, 50% on EMA20/VWAP pullback → improves avg entry
                 "scaleInLeg1Ratio": 0.5,  # fraction of calculated qty placed as Leg 1

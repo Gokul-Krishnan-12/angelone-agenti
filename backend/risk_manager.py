@@ -57,8 +57,8 @@ class RiskManager:
                 f"Max daily loss ({-config.get('maxDailyLoss', 2000)}) exceeded",
             )
 
-        # Check max daily trades (8 to 10 limit to prevent overtrading)
-        max_daily_trades = int(config.get("maxDailyTrades", 10))
+        # Check max daily trades (capped at 4 trades/day to prevent overtrading and fee drag)
+        max_daily_trades = int(config.get("maxDailyTrades", 4))
         if self.daily_trades_count >= max_daily_trades:
             return (
                 False,

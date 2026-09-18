@@ -148,10 +148,19 @@ def test_estimate_charges_client():
 def test_execute_with_rate_limit_backoff_and_retry(monkeypatch):
     """Verify that rate limit errors (exceeding access rate) trigger backoff and retry."""
     client = SmartApiClient()
+    client._last_api_request_time = 0.0
     call_count = 0
     sleeps = []
 
-    monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+    cur_time = 1000.0
+    monkeypatch.setattr("time.time", lambda: cur_time)
+
+    def fake_sleep(s):
+        nonlocal cur_time
+        sleeps.append(s)
+        cur_time += s
+
+    monkeypatch.setattr("time.sleep", fake_sleep)
 
     def mock_api_func():
         nonlocal call_count

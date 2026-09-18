@@ -232,6 +232,18 @@ def main():
         help="Minimum stop-loss width percent (default: 1.0%%)",
     )
     parser.add_argument(
+        "--max-sl-pct",
+        type=float,
+        default=1.8,
+        help="Maximum stop-loss width percent cap (default: 1.8%%)",
+    )
+    parser.add_argument(
+        "--max-daily-trades",
+        type=int,
+        default=4,
+        help="Maximum trades executed per day across portfolio (default: 4)",
+    )
+    parser.add_argument(
         "--no-trend-filter",
         action="store_true",
         help="Disable the 50-EMA trend alignment quality filter",
@@ -350,6 +362,8 @@ def main():
         trail_after_r=args.trail_after_r,
         trend_aligned=not args.no_trend_filter,
         min_sl_pct=args.min_sl_pct,
+        max_sl_pct=args.max_sl_pct,
+        max_trades_per_day=args.max_daily_trades,
         disabled_strategies=args.disabled_strategies,
     )
     trades = engine.run(symbol_dfs)

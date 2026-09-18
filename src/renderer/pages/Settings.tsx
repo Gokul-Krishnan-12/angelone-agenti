@@ -145,22 +145,29 @@ const Settings: React.FC = () => {
       ...prev,
       risk: {
         ...prev.risk,
-        maxCapitalPerTrade: 4000,
-        riskPerTrade: 500,
-        maxDailyLoss: 800,
+        maxCapitalPerTrade: 8000,
+        riskPerTrade: 700,
+        maxDailyLoss: 2000,
         maxSimultaneousPositions: 4,
-        maxDailyTrades: 8,
+        maxDailyTrades: 4,
         autoSquareOff: true,
         squareOffTime: "15:15",
         defaultStopLossPercent: 1.2,
-        defaultTargetPercent: 2.5
+        defaultTargetPercent: 2.4,
+        minConfluenceScore: 3,
+        minConfluenceScoreTrending: 3,
+        trendAlignmentFilter: true,
+        marketRegimeFilterEnabled: true,
+        partialBookingEnabled: true,
+        partialBookingTargetRR: 1.2,
+        partialBookingRatio: 0.5,
       }
     }));
   };
 
   const slPct = Number(localSettings.risk?.defaultStopLossPercent) || 1.2;
-  const tgtPct = Number(localSettings.risk?.defaultTargetPercent) || 2.5;
-  const maxCap = Number(localSettings.risk?.maxCapitalPerTrade) || 4000;
+  const tgtPct = Number(localSettings.risk?.defaultTargetPercent) || 2.4;
+  const maxCap = Number(localSettings.risk?.maxCapitalPerTrade) || 8000;
   const rrRatio = slPct > 0 ? (tgtPct / slPct).toFixed(1) : '0';
   const exampleEntry = 1000;
   const exampleTarget = (exampleEntry * (1 + tgtPct / 100)).toFixed(2);

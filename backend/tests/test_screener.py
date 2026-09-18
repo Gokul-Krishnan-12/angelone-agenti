@@ -87,22 +87,30 @@ def test_screener_rvol_and_institutional_participation():
 
 def test_trading_engine_periodic_dynamic_rescreening():
     """Verify that trading_engine re-screens every 30 minutes and preserves open trades."""
+    import datetime as dt_mod
     from backend.trading_engine import TradingEngine
 
     engine = TradingEngine()
     assert engine.screener_interval == 1800  # 30 minutes default
+    # Reset state to ensure clean slate regardless of when the test runs
+    engine.dynamic_watchlist = []
+    engine._screener_slots_completed = set()
+    engine._last_screener_time = 0.0
+    engine._last_screener_date = None
+    engine._screener_retry_due_at = 0.0
     engine.active_trades["EXISTING_HOLDING"] = {"sl": 100.0, "target": 110.0}
 
     call_count = 0
+
+    # Freeze clock inside the trading window: Wednesday 10:30 IST
+    fake_now = dt_mod.datetime(2025, 1, 8, 10, 30, 5)  # a Wednesday
 
     def mock_generate_watchlist(universe=None, limit=35):
         nonlocal call_count
         call_count += 1
         return [f"STOCK_{call_count}_{i}" for i in range(limit)]
 
-    with patch(
-        "backend.risk_manager.risk_manager.can_trade", return_value=(True, "OK")
-    ):
+    with patch("backend.risk_manager.risk_manager.can_trade", return_value=(True, "OK")):
         with patch.object(engine, "_reevaluate_positions"):
             with patch("backend.ticker.ticker_manager.subscribe"):
                 with patch(
@@ -110,27 +118,33 @@ def test_trading_engine_periodic_dynamic_rescreening():
                     side_effect=mock_generate_watchlist,
                 ):
                     with patch("backend.scanner.scanner.scan_watchlist") as mock_scan:
-                        # 1. First scan: screener should run because dynamic_watchlist is empty
-                        engine.scan_and_trade()
-                        assert call_count == 1
-                        assert "EXISTING_HOLDING" in engine.dynamic_watchlist
-                        assert engine.dynamic_watchlist[0] == "STOCK_1_0"
-                        assert mock_scan.called
+                        with patch("backend.market_hours.is_trading_day", return_value=True):
+                            with patch("datetime.datetime") as mock_dt:
+                                mock_dt.now.return_value = fake_now
+                                mock_dt.side_effect = lambda *args, **kw: dt_mod.datetime(*args, **kw)
 
-                        # 2. Immediate second scan: screener should NOT re-run (< 30 min)
-                        mock_scan.reset_mock()
-                        engine.scan_and_trade()
-                        assert call_count == 1
-                        assert mock_scan.called
+                                # 1. First scan: screener should run because dynamic_watchlist is empty
+                                engine.scan_and_trade()
+                                assert call_count == 1, f"Expected 1 screener call, got {call_count}"
+                                assert "EXISTING_HOLDING" in engine.dynamic_watchlist
+                                assert engine.dynamic_watchlist[0] == "STOCK_1_0"
+                                assert mock_scan.called
 
-                        # 3. Simulate 1801 seconds (30 minutes + 1 second) passing: screener SHOULD re-run
-                        engine._last_screener_time -= 1801
-                        mock_scan.reset_mock()
-                        engine.scan_and_trade()
-                        assert call_count == 2
-                        assert "EXISTING_HOLDING" in engine.dynamic_watchlist
-                        assert engine.dynamic_watchlist[0] == "STOCK_2_0"
-                        assert mock_scan.called
+                                # 2. Immediate second scan: screener should NOT re-run (< 30 min)
+                                mock_scan.reset_mock()
+                                engine.scan_and_trade()
+                                assert call_count == 1, "Screener should not have re-run yet"
+                                assert mock_scan.called
+
+                                # 3. Simulate 1801 seconds (30 minutes + 1 second) passing:
+                                #    screener SHOULD re-run via the elapsed-interval fallback path
+                                engine._last_screener_time -= 1801
+                                mock_scan.reset_mock()
+                                engine.scan_and_trade()
+                                assert call_count == 2, f"Expected 2 screener calls, got {call_count}"
+                                assert "EXISTING_HOLDING" in engine.dynamic_watchlist
+                                assert engine.dynamic_watchlist[0] == "STOCK_2_0"
+                                assert mock_scan.called
 
 
 def test_screener_window_strictly_930_to_1430():

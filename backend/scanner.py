@@ -92,8 +92,13 @@ STRATEGY_FAMILIES: Dict[str, Set[str]] = {
         "awesome_oscillator",
         "mfi_exhaustion",
     },
-    "breakout": {"bollinger_breakout", "donchian_breakout", "keltner_breakout"},
-    "intraday": {"vwap_bounce", "opening_range_breakout"},
+    "breakout": {
+        "bollinger_breakout",
+        "donchian_breakout",
+        "keltner_breakout",
+        "opening_range_breakout",
+    },
+    "intraday": {"vwap_bounce"},
     "volume": {"cmf_accumulation"},
     "structure": {
         "institutional_absorption",
@@ -245,6 +250,7 @@ class Scanner:
         min_rr: float = 2.0,
         df: Optional[pd.DataFrame] = None,
         min_sl_pct: float = 1.0,
+        max_sl_pct: float = 1.8,
         trend_aligned: bool = True,
         regime_enabled: bool = True,
         regime_min_adx: float = 20.0,
@@ -279,27 +285,22 @@ class Scanner:
 
 
         # ── 2. Adaptive Confluence Score Gate ────────────────────────
-        # TRENDING_BULL/TRENDING_BEAR: 2-family minimum (breakout/trend + volume/momentum)
-        # CHOPPY_RANGE/unknown: 3-family minimum
+        # Requires ≥ 3 independent families across all regimes
         families_seen: Set[str] = set()
         for sig in dir_signals:
             strat_id = sig.get("_strategy_id", "")
             families_seen.add(_get_strategy_family(strat_id))
 
         confluence_score = len(families_seen)
-        # Adaptive threshold — determined after regime is known; pre-check with min_confluence
-        # The regime check below may adjust effective_min_confluence downward for trending regimes
         if confluence_score < min_confluence:
-            # Will re-check after regime classification; skip if even regime-reduced threshold won't pass
             pass  # continue to regime block which sets effective_min_confluence
 
         # Take the signal with the highest confidence
         best = max(dir_signals, key=lambda s: s.get("confidence", 0))
 
         # ── 3. Market Regime Filter (suppress false-breakout churn in chop) ──
-        # Also drives adaptive confluence: trending regimes allow 2-family minimum
         regime_meta: Optional[Any] = None
-        effective_min_confluence = min_confluence  # default (choppy / unknown)
+        effective_min_confluence = min_confluence  # default
         if regime_enabled and df is not None and len(df) >= 20:
             regime_result = classify_market_regime(
                 df, min_adx=regime_min_adx, min_ker=regime_min_ker
@@ -317,11 +318,10 @@ class Scanner:
                 return None
             regime_meta = regime_result
 
-            # Adaptive confluence: in strong trending regimes, relax to 2-family minimum
             if regime_result.regime in ("TRENDING_BULL", "TRENDING_BEAR"):
                 from .config import config_manager as _cfg
                 trending_min = int(
-                    _cfg.get_risk_config().get("minConfluenceScoreTrending", 2)
+                    _cfg.get_risk_config().get("minConfluenceScoreTrending", 3)
                 )
                 effective_min_confluence = min(min_confluence, trending_min)
 
@@ -360,9 +360,11 @@ class Scanner:
             raw_risk = abs(entry_p - sl_p)
             current_sl_pct = (raw_risk / entry_p) * 100.0
 
-            # Widen tight SL to minimum safe buffer (e.g. 1.0%) to prevent noise stop-outs
+            # Widen tight SL to minimum safe buffer (e.g. 1.0%) and cap wide SL (e.g. 1.8% max)
             if min_sl_pct > 0 and current_sl_pct < min_sl_pct:
                 safe_risk = entry_p * (min_sl_pct / 100.0)
+            elif max_sl_pct > 0 and current_sl_pct > max_sl_pct:
+                safe_risk = entry_p * (max_sl_pct / 100.0)
             else:
                 safe_risk = raw_risk
 
@@ -414,6 +416,7 @@ class Scanner:
         min_rr = float(risk_config.get("minRiskReward", 2.0))
         no_entry_mins = int(risk_config.get("noEntryFirstMins", 15))
         min_sl_pct = float(risk_config.get("minStopLossPercent", 1.0))
+        max_sl_pct = float(risk_config.get("maxStopLossPercent", 1.8))
         trend_aligned = bool(risk_config.get("trendAlignmentFilter", True))
         regime_enabled = bool(risk_config.get("marketRegimeFilterEnabled", True))
         regime_min_adx = float(risk_config.get("marketRegimeMinADX", 20.0))
@@ -507,6 +510,7 @@ class Scanner:
                     min_rr,
                     df=df,
                     min_sl_pct=min_sl_pct,
+                    max_sl_pct=max_sl_pct,
                     trend_aligned=trend_aligned,
                     regime_enabled=regime_enabled,
                     regime_min_adx=regime_min_adx,
