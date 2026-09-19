@@ -39,27 +39,43 @@ def test_1r_risk_based_position_sizing(monkeypatch):
 
 
 def test_strategy_roster_pruning_defaults():
-    """Verify that toxic lagging indicators are disabled by default while alpha setups are enabled."""
+    """Verify that toxic lagging indicators and drag strategies are disabled while proven alpha setups are enabled.
+
+    Strategy defaults updated based on 60-day high-beta and 5m/15m walk-forward backtests:
+    - Enabled (10): bollinger_breakout, donchian_breakout, institutional_absorption,
+                    fixed_range_volume_profile, keltner_breakout, liquidity_grab_reversal,
+                    gap_fill, opening_range_breakout, macd_cross, stoc_rsi.
+    - Disabled (7 drag + oscillators): psar_trend (-₹11,654), order_block_fvg (-₹6,183),
+                    volume_delta_divergence (-₹5,206), tsi_cross (-₹4,148),
+                    awesome_oscillator (-₹2,513), cmf_accumulation (-₹12,286),
+                    cpr_breakout_reversal, ema_crossover, supertrend, williams_r, adx_momentum.
+    """
     strats = config_manager.get_strategy_config()
 
-    # Pruned lagging and negative-alpha setups on 5m intraday
-    assert strats.get("psar_trend", {}).get("enabled") is False
-    assert strats.get("ema_crossover", {}).get("enabled") is False
-    assert strats.get("macd_cross", {}).get("enabled") is False
-    assert strats.get("supertrend", {}).get("enabled") is False
-    assert strats.get("awesome_oscillator", {}).get("enabled") is False
-    assert strats.get("williams_r", {}).get("enabled") is False
-    assert strats.get("adx_momentum", {}).get("enabled") is False
-    assert strats.get("order_block_fvg", {}).get("enabled") is False
-    assert strats.get("institutional_absorption", {}).get("enabled") is False
-    assert strats.get("cpr_breakout_reversal", {}).get("enabled") is False
+    # ── Disabled: drag strategies pruned by walk-forward backtest evidence ──
+    assert strats.get("psar_trend", {}).get("enabled") is False, "psar_trend should be disabled (-₹11,654 drag)"
+    assert strats.get("order_block_fvg", {}).get("enabled") is False, "order_block_fvg should be disabled (-₹6,183 drag)"
+    assert strats.get("volume_delta_divergence", {}).get("enabled") is False, "volume_delta_divergence should be disabled (-₹5,206 drag)"
+    assert strats.get("tsi_cross", {}).get("enabled") is False, "tsi_cross should be disabled (-₹4,148 drag)"
+    assert strats.get("awesome_oscillator", {}).get("enabled") is False, "awesome_oscillator should be disabled (-₹2,513 drag)"
+    assert strats.get("cmf_accumulation", {}).get("enabled") is False, "cmf should be disabled (-₹12,286 drag)"
+    assert strats.get("cpr_breakout_reversal", {}).get("enabled") is False, "cpr should remain disabled (whipsaw on intraday)"
+    assert strats.get("ema_crossover", {}).get("enabled") is False, "ema_crossover should remain disabled (-₹2,201)"
+    assert strats.get("supertrend", {}).get("enabled") is False, "supertrend should remain disabled (whipsaw prone)"
+    assert strats.get("williams_r", {}).get("enabled") is False, "williams_r should remain disabled (56.8% SL rate)"
+    assert strats.get("adx_momentum", {}).get("enabled") is False, "adx_momentum should remain disabled (62% SL rate)"
 
-    # High-expectancy breakout & volume alpha setups
-    assert strats.get("donchian_breakout", {}).get("enabled") is True
-    assert strats.get("keltner_breakout", {}).get("enabled") is True
+    # ── Core alpha strategies: proven net-positive across walk-forward backtests ──
     assert strats.get("bollinger_breakout", {}).get("enabled") is True
-    assert strats.get("volume_delta_divergence", {}).get("enabled") is True
-    assert strats.get("cmf_accumulation", {}).get("enabled") is True
+    assert strats.get("donchian_breakout", {}).get("enabled") is True
+    assert strats.get("institutional_absorption", {}).get("enabled") is True
+    assert strats.get("fixed_range_volume_profile", {}).get("enabled") is True
+    assert strats.get("keltner_breakout", {}).get("enabled") is True
+    assert strats.get("liquidity_grab_reversal", {}).get("enabled") is True
+    assert strats.get("gap_fill", {}).get("enabled") is True
+    assert strats.get("opening_range_breakout", {}).get("enabled") is True
+    assert strats.get("macd_cross", {}).get("enabled") is True
+    assert strats.get("stoc_rsi", {}).get("enabled") is True
 
 
 def test_active_trades_disk_persistence(tmp_path, monkeypatch):

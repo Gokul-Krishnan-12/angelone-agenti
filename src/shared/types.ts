@@ -229,6 +229,7 @@ export interface Signal {
   reasoning: string;
   timestamp: string;
   indicators: Record<string, number>;
+  isPullbackEntry?: boolean;
 }
 
 export interface AgentState {
@@ -267,12 +268,20 @@ export interface RiskConfig {
   marketRegimeMinADX?: number;
   marketRegimeMinKER?: number;
   marketRegimeBlockChoppyBreakouts?: boolean;
+  pullbackEntryEnabled?: boolean;
+  scaleInEnabled?: boolean;
   trailingStopEnabled: boolean;
-  trailingStopPercent: number;
   trailingSlEnabled?: boolean;
   trailingSlAtrMultiplier?: number;
   trailingSlProfitCushionR?: number;
+  partialBookingEnabled?: boolean;
+  partialBookingTargetRR?: number;
   pendingOrderTimeoutSeconds?: number;
+  microstructureFilterEnabled?: boolean;
+  microstructureMinRvol?: number;
+  microstructureMaxWick?: number;
+  microstructureMinKer?: number;
+  microstructureMiddayGuard?: boolean;
 }
 
 // ─── Strategy Configuration ───────────────────────────────────────

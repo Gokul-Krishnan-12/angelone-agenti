@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTradingStore } from '../stores/trading-store';
+import { usePaperTradingStore } from '../stores/paper-trading-store';
 import { useSmartAPI } from '../hooks/useSmartAPI';
 import { getSignalStatus, formatSignalTime } from '../utils/signal-status';
 import {
@@ -13,49 +14,68 @@ import {
   Square,
   Filter,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  Target
 } from 'lucide-react';
 
-// Top 10 strategies selected by 6-month backtest P&L on 20 Nifty 50 stocks.
-// ── Active Alpha Suite: Breakout, Institutional Volume, Reversals ──────────
+// Top 10 alpha strategies selected by 60-day walk-forward backtest P&L on F&O universe
+// ── Active Alpha Suite: Breakout, Institutional Absorption, Structure & Dynamic Reversals ──
 export const ALL_STRATEGIES = [
-  { id: 'cpr_breakout_reversal',       name: 'Central Pivot Range (CPR)',         category: 'Smart Money', rank: 1, winRate: 75 },
-  { id: 'liquidity_grab_reversal',     name: 'Liquidity Grab Reversal',          category: 'Smart Money', rank: 2, winRate: 78 },
-  { id: 'opening_range_breakout',      name: 'Opening Range Breakout',           category: 'Intraday',    rank: 3, winRate: 72 },
-  { id: 'gap_fill',                    name: 'Gap Fill Reversal',                 category: 'Reversal',    rank: 4, winRate: 68 },
-  { id: 'order_block_fvg',              name: 'Order Block & FVG',               category: 'Smart Money', rank: 5, winRate: 65 },
-  { id: 'institutional_absorption',     name: 'Institutional Absorption',        category: 'Smart Money', rank: 6, winRate: 64 },
-  { id: 'volume_delta_divergence',     name: 'Volume Delta Divergence',          category: 'Smart Money', rank: 7, winRate: 62 },
-  { id: 'fixed_range_volume_profile',   name: 'Fixed Range Volume Profile (FRVP)', category: 'Smart Money', rank: 8, winRate: 66 },
-  { id: 'cmf_accumulation',            name: 'CMF Institutional Flow',          category: 'Smart Money', rank: 9, winRate: 60 },
-  { id: 'bollinger_breakout',          name: 'Bollinger Breakout',              category: 'Breakout',    rank: 10, winRate: 58 },
-  { id: 'keltner_breakout',            name: 'Keltner Breakout',                category: 'Breakout',    rank: 11, winRate: 57 },
-  { id: 'donchian_breakout',            name: 'Donchian Breakout',               category: 'Breakout',    rank: 12, winRate: 55 },
+  { id: 'bollinger_breakout',          name: 'Bollinger Breakout',              category: 'Breakout',    rank: 1, winRate: 64 },
+  { id: 'donchian_breakout',            name: 'Donchian Breakout',               category: 'Breakout',    rank: 2, winRate: 62 },
+  { id: 'institutional_absorption',     name: 'Institutional Absorption',        category: 'Smart Money', rank: 3, winRate: 66 },
+  { id: 'fixed_range_volume_profile',   name: 'Fixed Range Volume Profile (FRVP)', category: 'Smart Money', rank: 4, winRate: 65 },
+  { id: 'keltner_breakout',            name: 'Keltner Breakout',                category: 'Breakout',    rank: 5, winRate: 60 },
+  { id: 'liquidity_grab_reversal',     name: 'Liquidity Grab Reversal',          category: 'Smart Money', rank: 6, winRate: 68 },
+  { id: 'gap_fill',                    name: 'Gap Fill Reversal',                 category: 'Reversal',    rank: 7, winRate: 65 },
+  { id: 'opening_range_breakout',      name: 'Opening Range Breakout',           category: 'Intraday',    rank: 8, winRate: 63 },
+  { id: 'macd_cross',                  name: 'MACD Trend Momentum',             category: 'Momentum',    rank: 9, winRate: 58 },
+  { id: 'stoc_rsi',                    name: 'Stochastic RSI Confluence',       category: 'Oscillator',  rank: 10, winRate: 57 },
 ];
 
-// Disabled — lagging indicators & negative expectancy oscillators pruned to prevent fee drag
+// Disabled — net drag & lagging indicators pruned to prevent whipsaws and regulatory friction drain
 export const DISABLED_STRATEGIES = [
-  { id: 'psar_trend',              name: 'Parabolic SAR',           category: 'Trend',       backtestPnl: -8575 },
-  { id: 'macd_cross',              name: 'MACD Cross',              category: 'Momentum',    backtestPnl: -3384 },
-  { id: 'ema_crossover',            name: 'EMA Crossover',           category: 'Trend',       backtestPnl: -2201 },
-  { id: 'supertrend',               name: 'Supertrend',              category: 'Trend',       backtestPnl: -1238 },
-  { id: 'tsi_cross',               name: 'True Strength Index',     category: 'Momentum',    backtestPnl: -1476 },
-  { id: 'awesome_oscillator',       name: 'Awesome Oscillator',      category: 'Oscillator',  backtestPnl:  -912 },
-  { id: 'stoc_rsi',                 name: 'Stochastic RSI',          category: 'Oscillator',  backtestPnl:  -514 },
-  { id: 'stochastic_reversal',     name: 'Stochastic Reversal',     category: 'Oscillator',  backtestPnl:  -909 },
-  { id: 'mfi_exhaustion',           name: 'MFI Exhaustion',          category: 'Volume',      backtestPnl:   -7 },
-  { id: 'williams_r',              name: 'Williams %R',             category: 'Oscillator',  backtestPnl:  -941 },
-  { id: 'cci_reversal',            name: 'CCI Reversal',            category: 'Oscillator',  backtestPnl:  -826 },
-  { id: 'adx_momentum',             name: 'ADX Momentum',            category: 'Momentum',    backtestPnl:  -251 },
-  { id: 'rsi_reversal',             name: 'RSI Reversal',            category: 'Momentum',    backtestPnl:  -131 },
-  { id: 'vwap_bounce',              name: 'VWAP Bounce',             category: 'Intraday',    backtestPnl:  -172 },
+  { id: 'order_block_fvg',              name: 'Order Block & FVG',               category: 'Smart Money', backtestPnl: -6183 },
+  { id: 'psar_trend',                  name: 'Parabolic SAR',                   category: 'Trend',       backtestPnl: -11654 },
+  { id: 'volume_delta_divergence',     name: 'Volume Delta Divergence',          category: 'Smart Money', backtestPnl: -5206 },
+  { id: 'tsi_cross',                   name: 'True Strength Index',             category: 'Momentum',    backtestPnl: -4148 },
+  { id: 'awesome_oscillator',           name: 'Awesome Oscillator',              category: 'Oscillator',  backtestPnl: -2513 },
+  { id: 'cmf_accumulation',            name: 'CMF Institutional Flow',          category: 'Smart Money', backtestPnl: -12286 },
+  { id: 'cpr_breakout_reversal',       name: 'Central Pivot Range (CPR)',         category: 'Smart Money', backtestPnl: -1890 },
+  { id: 'ema_crossover',                name: 'EMA Crossover',                   category: 'Trend',       backtestPnl: -2201 },
+  { id: 'supertrend',                   name: 'Supertrend',                      category: 'Trend',       backtestPnl: -1238 },
+  { id: 'stochastic_reversal',         name: 'Stochastic Reversal',             category: 'Oscillator',  backtestPnl:  -909 },
+  { id: 'mfi_exhaustion',               name: 'MFI Exhaustion',                  category: 'Volume',      backtestPnl:    -7 },
+  { id: 'williams_r',                  name: 'Williams %R',                     category: 'Oscillator',  backtestPnl:  -941 },
+  { id: 'cci_reversal',                name: 'CCI Reversal',                    category: 'Oscillator',  backtestPnl:  -826 },
+  { id: 'adx_momentum',                 name: 'ADX Momentum',                    category: 'Momentum',    backtestPnl:  -251 },
+  { id: 'rsi_reversal',                 name: 'RSI Reversal',                    category: 'Momentum',    backtestPnl:  -131 },
+  { id: 'vwap_bounce',                  name: 'VWAP Bounce',                     category: 'Intraday',    backtestPnl:  -172 },
 ];
 
 const AgentControl: React.FC = () => {
-  const { agentState, signals, setAgentState, ticks } = useTradingStore();
+  const { agentState, signals, setAgentState, ticks, settings, setSettings } = useTradingStore();
   const { startAgent, stopAgent } = useSmartAPI();
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [executedTrade, setExecutedTrade] = useState<string>('');
+
+  const isPullbackEnabled = Boolean(settings?.risk?.pullbackEntryEnabled);
+
+  const handlePullbackToggle = (enabled: boolean) => {
+    if (!settings) return;
+    const updatedRisk = {
+      ...settings.risk,
+      pullbackEntryEnabled: enabled,
+    };
+    const updatedSettings = {
+      ...settings,
+      risk: updatedRisk,
+    };
+    setSettings(updatedSettings);
+    // Sync to paper trading sandbox store as well
+    usePaperTradingStore.getState().setPullbackEntryEnabled(enabled);
+    window.electronAPI?.invoke('settings:save', { risk: updatedRisk });
+  };
 
   // Auto-subscribe signal symbols to ticker stream
   useEffect(() => {
@@ -237,6 +257,52 @@ const AgentControl: React.FC = () => {
             </div>
           </div>
 
+          {/* Entry Execution Strategy: Direct Breakout vs Pullback Retest */}
+          <div className="bg-surface-800/90 backdrop-blur-sm border border-surface-700/80 rounded-2xl p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-surface-300 flex items-center gap-2">
+                <Target size={16} className="text-accent-light" />
+                <span>Entry Strategy</span>
+              </h2>
+              <span className={`text-[10px] uppercase font-mono font-bold px-2.5 py-0.5 rounded-full border ${!isPullbackEnabled ? 'bg-profit-dark/20 text-profit-light border-profit/30' : 'bg-accent/20 text-accent-light border-accent/30'}`}>
+                {!isPullbackEnabled ? '⚡ DIRECT ENTRY (DEFAULT)' : '🎯 PULLBACK RETEST'}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div 
+                onClick={() => handlePullbackToggle(false)}
+                className={`p-4 rounded-xl border-2 transition-all cursor-pointer ${!isPullbackEnabled ? 'border-profit-light bg-surface-700/70 shadow-md' : 'border-surface-700 bg-surface-900/60 hover:border-surface-600'}`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <Zap size={15} className="text-profit-light" />
+                    <span className="font-bold text-white text-sm">Direct Breakout Entry (Instant)</span>
+                  </div>
+                  {!isPullbackEnabled && <Check size={16} className="text-profit-light" />}
+                </div>
+                <p className="text-xs text-surface-400">
+                  Enters immediately at current breakout/market price without waiting for pullbacks. Avoids missing explosive runaway trends.
+                </p>
+              </div>
+
+              <div 
+                onClick={() => handlePullbackToggle(true)}
+                className={`p-4 rounded-xl border-2 transition-all cursor-pointer ${isPullbackEnabled ? 'border-accent-light bg-surface-700/70 shadow-md' : 'border-surface-700 bg-surface-900/60 hover:border-surface-600'}`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <Target size={15} className="text-accent-light" />
+                    <span className="font-bold text-white text-sm">Pullback Retest Entry (Conservative)</span>
+                  </div>
+                  {isPullbackEnabled && <Check size={16} className="text-accent-light" />}
+                </div>
+                <p className="text-xs text-surface-400">
+                  Calculates limit orders anchored to nearest value support/resistance (EMA20/VWAP/POC) before entering.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Active Technical Strategies (11 Alpha Strategies) */}
           <div className="bg-surface-800/90 backdrop-blur-sm border border-surface-700/80 rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-surface-700/70">
@@ -396,6 +462,9 @@ const AgentControl: React.FC = () => {
                       </div>
 
                       <div className="flex items-center gap-1.5">
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold border ${bestSignal.isPullbackEntry ? 'bg-accent/20 text-accent-light border-accent/30' : 'bg-profit-dark/20 text-profit-light border-profit/30'}`}>
+                          {bestSignal.isPullbackEntry ? '🎯 Pullback' : '⚡ Direct'}
+                        </span>
                         <span className="text-[10px] bg-accent/20 text-accent-light px-2 py-0.5 rounded font-mono font-bold border border-accent/30">
                           {group.confluenceScore} {group.confluenceScore === 1 ? 'Algo' : 'Algos'}
                         </span>

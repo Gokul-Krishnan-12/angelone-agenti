@@ -77,7 +77,7 @@ from .strategies.volume_delta_divergence import VolumeDeltaDivergenceStrategy
 from .strategies.vwap_bounce import VWAPBounceStrategy
 from .strategies.williams_r import WilliamsRStrategy
 
-# ─── Strategy family definitions ──────────────────────────────────────────────
+# ── Strategy family definitions ─────────────────────────────────────────────
 # Each family counts as exactly ONE vote in the confluence score, regardless of
 # how many individual strategies within that family fire.
 
@@ -109,6 +109,33 @@ STRATEGY_FAMILIES: Dict[str, Set[str]] = {
     },
     # High-win-rate reversal strategies form their own family
     "reversal": {"liquidity_grab_reversal", "gap_fill"},
+}
+
+# ── Weighted confluence scoring ───────────────────────────────────────────────
+# Families are weighted by their empirical alpha contribution from backtests.
+# Breakout + momentum + structure families carry the most edge; oscillators
+# (which are often correlated) carry less weight so multi-oscillator combos
+# don’t artificially inflate the confluence score past the gate.
+#
+# Backtest evidence (60d high-beta universe):
+#   breakout family  → +₹38,854 net   ⇒ weight 1.5×
+#   structure family → +₹23,236 net   ⇒ weight 1.2×
+#   momentum family  → +₹19,938 net   ⇒ weight 1.3×
+#   volume family    → +₹9,029  net   ⇒ weight 1.0× (baseline)
+#   trend family     → +₹12,645 net   ⇒ weight 1.1×
+#   reversal family  → positive        ⇒ weight 1.2×
+#   oscillator family→ lower alpha     ⇒ weight 0.7× (prevents oscillator echo)
+
+FAMILY_WEIGHTS: Dict[str, float] = {
+    "breakout": 1.5,
+    "momentum": 1.3,
+    "structure": 1.2,
+    "reversal": 1.2,
+    "trend": 1.1,
+    "volume": 1.0,
+    "intraday": 0.9,
+    "oscillator": 0.7,   # correlated indicators; weighted down to avoid fake confluence
+    "other": 0.8,
 }
 
 
@@ -256,6 +283,7 @@ class Scanner:
         regime_min_adx: float = 20.0,
         regime_min_ker: float = 0.35,
         regime_block_choppy: bool = True,
+        pullback_entry_enabled: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Apply confluence, market regime, 1:2 R:R, and risk quality gates to a group of same-direction signals.
@@ -284,14 +312,19 @@ class Scanner:
                 return None  # reject confirmed counter-trend shorts
 
 
-        # ── 2. Adaptive Confluence Score Gate ────────────────────────
-        # Requires ≥ 3 independent families across all regimes
+        # ── 2. Adaptive Weighted Confluence Score Gate ────────────────────
+        # Each family that fires contributes its empirical weight to the score.
+        # Minimum raw family count is still required; weighted score adds quality gate.
         families_seen: Set[str] = set()
+        weighted_confluence: float = 0.0
         for sig in dir_signals:
             strat_id = sig.get("_strategy_id", "")
-            families_seen.add(_get_strategy_family(strat_id))
+            fam = _get_strategy_family(strat_id)
+            if fam not in families_seen:
+                families_seen.add(fam)
+                weighted_confluence += FAMILY_WEIGHTS.get(fam, 0.8)
 
-        confluence_score = len(families_seen)
+        confluence_score = len(families_seen)  # raw family count for gate comparison
         if confluence_score < min_confluence:
             pass  # continue to regime block which sets effective_min_confluence
 
@@ -321,7 +354,7 @@ class Scanner:
             if regime_result.regime in ("TRENDING_BULL", "TRENDING_BEAR"):
                 from .config import config_manager as _cfg
                 trending_min = int(
-                    _cfg.get_risk_config().get("minConfluenceScoreTrending", 3)
+                    _cfg.get_risk_config().get("minConfluenceScoreTrending", 2)
                 )
                 effective_min_confluence = min(min_confluence, trending_min)
 
@@ -329,24 +362,58 @@ class Scanner:
         if confluence_score < effective_min_confluence:
             return None
 
+        # ── 3.5. Dynamic Microstructural Quality Gate ────────────────────
+        # Rejects false-breakout traps based on empirical microstructural metrics:
+        # RVOL < 1.2x, Rejection Wick > 25%, Local KER < 0.30, or Midday lull without surge.
+        from .config import config_manager as _cfg_mgr
+        risk_cfg = _cfg_mgr.get_risk_config()
+        micro_metrics: Dict[str, Any] = {}
+        if risk_cfg.get("microstructureFilterEnabled", True) and df is not None and len(df) >= 5:
+            from .microstructure import evaluate_microstructure_quality
+            min_rvol = float(risk_cfg.get("microstructureMinRvol", 1.2))
+            min_ker = float(risk_cfg.get("microstructureMinKer", 0.30))
+            max_wick = float(risk_cfg.get("microstructureMaxWick", 0.25))
+            midday_boost = 2.2 if risk_cfg.get("microstructureMiddayGuard", True) else min_rvol
+
+            passed_micro, micro_reason, micro_metrics = evaluate_microstructure_quality(
+                df=df,
+                direction=direction,
+                min_rvol=min_rvol,
+                min_ker=min_ker,
+                max_wick_ratio=max_wick,
+                midday_rvol_boost=midday_boost,
+            )
+            if not passed_micro:
+                logger.info(
+                    "Signal for %s rejected by Microstructural Quality Gate: %s",
+                    best.get("tradingsymbol", "UNKNOWN"),
+                    micro_reason,
+                )
+                return None
+
         # ── 4. Value Pullback Limit Entry & Volatility-Buffered Stop-Loss ──
         best = dict(best)
         entry_p = float(best.get("entryPrice", best.get("price", 0.0)))
         sl_p = float(best.get("stopLoss", best.get("sl", 0.0)))
         raw_target = float(best.get("target", 0.0))
 
+        is_pullback = False
         if df is not None and len(df) >= 5:
             from .strategy_engine import (
                 calculate_pullback_limit_entry,
                 calculate_volatility_buffered_sl,
             )
 
-            # Task 2: Shift from breakout chasing to nearest value pullback limit order
-            pullback_entry = calculate_pullback_limit_entry(
-                df=df, direction=direction, breakout_level=entry_p
-            )
-            if pullback_entry > 0:
-                entry_p = pullback_entry
+            # Optional Pullback Limit Entry (EMA20/VWAP/POC retest vs Direct Breakout Entry)
+            if pullback_entry_enabled:
+                pullback_entry = calculate_pullback_limit_entry(
+                    df=df, direction=direction, breakout_level=entry_p
+                )
+                if pullback_entry > 0:
+                    entry_p = pullback_entry
+                    best["entryPrice"] = entry_p
+                    is_pullback = True
+            else:
                 best["entryPrice"] = entry_p
 
             # Task 1: Add 0.5x ATR volatility buffer to structural stop losses
@@ -355,6 +422,8 @@ class Scanner:
             )
             if buffered_sl > 0:
                 sl_p = buffered_sl
+
+        best["isPullbackEntry"] = is_pullback
 
         if entry_p > 0 and sl_p > 0:
             raw_risk = abs(entry_p - sl_p)
@@ -388,6 +457,7 @@ class Scanner:
 
         # Enrich the chosen signal with confluence and regime metadata
         best["confluenceScore"] = confluence_score
+        best["weightedConfluenceScore"] = round(weighted_confluence, 2)
         best["familiesVoting"] = sorted(families_seen)
         best["strategyCount"] = len(dir_signals)
         best["allStrategies"] = [
@@ -397,6 +467,11 @@ class Scanner:
             best["marketRegime"] = regime_meta.regime
             best["adx"] = regime_meta.adx
             best["ker"] = regime_meta.ker
+
+        if micro_metrics:
+            best["rvol"] = micro_metrics.get("rvol", 1.0)
+            best["wickRatio"] = micro_metrics.get("wick_ratio", 0.0)
+            best["localKer"] = micro_metrics.get("local_ker", 0.5)
 
         best.pop("_strategy_id", None)
         return best
@@ -423,6 +498,9 @@ class Scanner:
         regime_min_ker = float(risk_config.get("marketRegimeMinKER", 0.35))
         regime_block_choppy = bool(
             risk_config.get("marketRegimeBlockChoppyBreakouts", True)
+        )
+        pullback_entry_enabled = bool(
+            risk_config.get("pullbackEntryEnabled", False)
         )
 
         def process_symbol(symbol: str) -> List[Dict[str, Any]]:
@@ -516,6 +594,7 @@ class Scanner:
                     regime_min_adx=regime_min_adx,
                     regime_min_ker=regime_min_ker,
                     regime_block_choppy=regime_block_choppy,
+                    pullback_entry_enabled=pullback_entry_enabled,
                 )
                 if validated_sig is not None:
                     validated.append(validated_sig)
@@ -536,7 +615,10 @@ class Scanner:
                 print(f"Error processing {symbol}: {e}", file=sys.stderr)
 
         all_signals.sort(
-            key=lambda x: x.get("confluenceScore", 0) * 100 + x.get("confidence", 0),
+            key=lambda x: (
+                x.get("weightedConfluenceScore", x.get("confluenceScore", 0)) * 100
+                + x.get("confidence", 0)
+            ),
             reverse=True,
         )
         return all_signals

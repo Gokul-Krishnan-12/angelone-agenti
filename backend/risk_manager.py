@@ -174,8 +174,10 @@ class RiskManager:
             trade["high_water_mark"] = hwm
             # Only activate trailing SL once trade advances at least threshold into profit
             if (hwm - entry_price) >= profit_threshold:
-                # Ratchet to at least breakeven (entry_price) or hwm - distance
-                new_sl = round(max(current_sl, entry_price, hwm - distance), 2)
+                trail_candidate = hwm - distance
+                if (hwm - entry_price) >= 1.5 * trade_risk:
+                    trail_candidate = max(trail_candidate, entry_price)
+                new_sl = round(max(current_sl, trail_candidate), 2)
                 if new_sl > current_sl:
                     return new_sl
         else:  # SELL
@@ -183,8 +185,10 @@ class RiskManager:
             trade["low_water_mark"] = lwm
             # Only activate trailing SL once trade drops at least threshold into profit
             if (entry_price - lwm) >= profit_threshold:
-                # Ratchet to at least breakeven (entry_price) or lwm + distance
-                new_sl = round(min(current_sl, entry_price, lwm + distance), 2)
+                trail_candidate = lwm + distance
+                if (entry_price - lwm) >= 1.5 * trade_risk:
+                    trail_candidate = min(trail_candidate, entry_price)
+                new_sl = round(min(current_sl, trail_candidate), 2)
                 if new_sl < current_sl:
                     return new_sl
 

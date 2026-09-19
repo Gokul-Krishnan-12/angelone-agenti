@@ -220,6 +220,31 @@ def _apply_confluence(
     if family_count < effective_min_confluence:
         return None
 
+    # ── Dynamic Microstructural Quality Gate ─────────────────────────
+    if df is not None and len(df) >= 5:
+        from ..microstructure import evaluate_microstructure_quality
+
+        curr_ts = None
+        if isinstance(df.index, pd.DatetimeIndex) and len(df.index) > 0:
+            curr_ts = df.index[-1]
+        elif "datetime" in df.columns:
+            try:
+                curr_ts = pd.to_datetime(df["datetime"].iloc[-1])
+            except Exception:
+                pass
+
+        passed_micro, _, _ = evaluate_microstructure_quality(
+            df=df,
+            direction=direction,
+            min_rvol=1.2,
+            min_ker=0.30,
+            max_wick_ratio=0.25,
+            midday_rvol_boost=2.2,
+            current_time=curr_ts,
+        )
+        if not passed_micro:
+            return None
+
     best = dict(best)
     entry_p = float(best.get("entryPrice", best.get("price", 0.0)))
     sl_p = float(best.get("stopLoss", best.get("sl", 0.0)))
@@ -275,6 +300,8 @@ def _apply_confluence(
     ]
     if regime_meta is not None:
         best["marketRegime"] = regime_meta.regime
+        best["adx"] = round(regime_meta.adx, 2)
+        best["ker"] = round(regime_meta.ker, 3)
     return best
 
 
@@ -285,12 +312,12 @@ class BacktestEngine:
     def __init__(
         self,
         min_confluence: int = 3,
-        min_confluence_trending: int = 3,
+        min_confluence_trending: int = 2,
         min_rr: float = 2.0,
         capital_per_trade: float = 20_000.0,
-        trailing_sl_multiplier: float = 2.2,
+        trailing_sl_multiplier: float = 1.4,
         min_bars: int = 60,
-        trail_after_r: float = 1.0,
+        trail_after_r: float = 1.2,
         trend_aligned: bool = True,
         min_sl_pct: float = 1.2,
         max_sl_pct: float = 2.4,
@@ -303,7 +330,7 @@ class BacktestEngine:
         regime_min_ker: float = 0.35,
         regime_block_choppy: bool = True,
         partial_booking_enabled: bool = True,
-        partial_target_rr: float = 1.0,
+        partial_target_rr: float = 1.2,
         partial_booking_ratio: float = 0.5,
     ):
         self.min_confluence = min_confluence
@@ -395,14 +422,20 @@ class BacktestEngine:
             hwm = max(hwm, ltp)
             # Only activate trailing SL once trade advances at least threshold into profit
             if (hwm - entry_price) >= threshold:
-                new_sl = round(max(trade_sl, entry_price, hwm - distance), 2)
+                trail_candidate = hwm - distance
+                if (hwm - entry_price) >= 1.5 * trade_risk:
+                    trail_candidate = max(trail_candidate, entry_price)
+                new_sl = round(max(trade_sl, trail_candidate), 2)
                 if new_sl > trade_sl:
                     return new_sl, hwm, lwm
         else:
             lwm = min(lwm, ltp)
             # Only activate trailing SL once trade drops at least threshold into profit
             if (entry_price - lwm) >= threshold:
-                new_sl = round(min(trade_sl, entry_price, lwm + distance), 2)
+                trail_candidate = lwm + distance
+                if (entry_price - lwm) >= 1.5 * trade_risk:
+                    trail_candidate = min(trail_candidate, entry_price)
+                new_sl = round(min(trade_sl, trail_candidate), 2)
                 if new_sl < trade_sl:
                     return new_sl, hwm, lwm
 
@@ -516,6 +549,8 @@ class BacktestEngine:
                     i += 1
                     continue
 
+            entry_adx = float(chosen.get("adx", 0.0))
+
             # Manage trade bar-by-bar with Partial Booking (+1.2R) & Breakeven SL
             trade_sl = initial_sl
             hwm = entry_price
@@ -556,12 +591,21 @@ class BacktestEngine:
                         partial_booked = True
                         partial_exit_price = target1
                         partial_pnl_rs = (target1 - entry_price) * leg1_qty
-                        trade_sl = max(trade_sl, entry_price)  # Move SL to Breakeven
+                        # Only move SL all the way to breakeven if trend is strong (ADX >= 25)
+                        # In ranging/choppy conditions (ADX < 25), pull SL up by 60% of risk (to entry_price - 0.4*risk)
+                        # so that normal pullbacks don't choke the runner immediately at breakeven!
+                        if entry_adx >= 25.0:
+                            trade_sl = max(trade_sl, entry_price)
+                        else:
+                            trade_sl = max(trade_sl, round(entry_price - 0.4 * trade_risk, 2))
                     elif direction == "SELL" and lo <= target1:
                         partial_booked = True
                         partial_exit_price = target1
                         partial_pnl_rs = (entry_price - target1) * leg1_qty
-                        trade_sl = min(trade_sl, entry_price)  # Move SL to Breakeven
+                        if entry_adx >= 25.0:
+                            trade_sl = min(trade_sl, entry_price)
+                        else:
+                            trade_sl = min(trade_sl, round(entry_price + 0.4 * trade_risk, 2))
 
                 # ── Check Exit Conditions for Remaining Runner ────────
                 if direction == "BUY":

@@ -19,6 +19,12 @@ import argparse
 import sys
 import time
 from typing import List, Optional
+from pathlib import Path
+
+# Ensure workspace root is on sys.path
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 # ── Default symbol list (Nifty 50 liquid names) ──────────────────────────────
 
@@ -48,7 +54,12 @@ NIFTY_50_SUBSET = [
 SHORT_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
 
-DEFAULT_BLACKLIST: List[str] = ["PGEL", "TIINDIA", "RECLTD"]
+try:
+    from ..screener import DEFAULT_BLACKLIST as SCREENER_BLACKLIST
+except (ImportError, ValueError):
+    from backend.screener import DEFAULT_BLACKLIST as SCREENER_BLACKLIST
+
+DEFAULT_BLACKLIST: List[str] = sorted(list(set(SCREENER_BLACKLIST)))
 
 
 def screen_top_momentum_fno(
@@ -208,6 +219,12 @@ def main():
         help="Minimum confluence score (default: 3)",
     )
     parser.add_argument(
+        "--confluence-trending",
+        type=int,
+        default=2,
+        help="Minimum confluence score in trending regime (default: 2)",
+    )
+    parser.add_argument(
         "--min-rr",
         type=float,
         default=2.0,
@@ -216,26 +233,26 @@ def main():
     parser.add_argument(
         "--trailing-atr",
         type=float,
-        default=2.0,
-        help="Trailing stop loss multiplier (default: 2.0 × ATR)",
+        default=1.4,
+        help="Trailing stop loss multiplier (default: 1.4 × ATR)",
     )
     parser.add_argument(
         "--trail-after-r",
         type=float,
-        default=1.0,
-        help="Activate trailing SL only after reaching N × R profit (default: 1.0)",
+        default=1.2,
+        help="Activate trailing SL only after reaching N × R profit (default: 1.2)",
     )
     parser.add_argument(
         "--min-sl-pct",
         type=float,
-        default=1.0,
-        help="Minimum stop-loss width percent (default: 1.0%%)",
+        default=1.2,
+        help="Minimum stop-loss width percent (default: 1.2%%)",
     )
     parser.add_argument(
         "--max-sl-pct",
         type=float,
-        default=1.8,
-        help="Maximum stop-loss width percent cap (default: 1.8%%)",
+        default=2.4,
+        help="Maximum stop-loss width percent cap (default: 2.4%%)",
     )
     parser.add_argument(
         "--max-daily-trades",
@@ -247,6 +264,11 @@ def main():
         "--no-trend-filter",
         action="store_true",
         help="Disable the 50-EMA trend alignment quality filter",
+    )
+    parser.add_argument(
+        "--no-partial-booking",
+        action="store_true",
+        help="Disable partial booking (let runners ride with trailing SL to target)",
     )
     parser.add_argument(
         "--disabled-strategies",
@@ -349,12 +371,16 @@ def main():
     print(f"\n  Successfully loaded {len(symbol_dfs)}/{len(symbols)} symbols.")
 
     # ── Step 2: Run backtest ───────────────────────────────────────────
-    from .engine import BacktestEngine
+    try:
+        from .engine import BacktestEngine
+    except (ImportError, ValueError):
+        from backend.backtest.engine import BacktestEngine
 
     print("\n[Step 2/3] Running walk-forward backtest...")
     t0 = time.time()
     engine = BacktestEngine(
         min_confluence=args.confluence,
+        min_confluence_trending=args.confluence_trending,
         min_rr=args.min_rr,
         capital_per_trade=args.capital,
         trailing_sl_multiplier=args.trailing_atr,
@@ -365,6 +391,7 @@ def main():
         max_sl_pct=args.max_sl_pct,
         max_trades_per_day=args.max_daily_trades,
         disabled_strategies=args.disabled_strategies,
+        partial_booking_enabled=not args.no_partial_booking,
     )
     trades = engine.run(symbol_dfs)
     elapsed = time.time() - t0
@@ -377,7 +404,10 @@ def main():
         sys.exit(0)
 
     # ── Step 3: Report ─────────────────────────────────────────────────
-    from .reporter import generate_report
+    try:
+        from .reporter import generate_report
+    except (ImportError, ValueError):
+        from backend.backtest.reporter import generate_report
 
     print("\n[Step 3/3] Generating report...")
     generate_report(

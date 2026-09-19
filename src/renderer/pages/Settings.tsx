@@ -104,7 +104,13 @@ const Settings: React.FC = () => {
         'maxSimultaneousPositions',
         'maxDailyTrades',
         'defaultStopLossPercent',
-        'defaultTargetPercent'
+        'defaultTargetPercent',
+        'trailingSlAtrMultiplier',
+        'trailingSlProfitCushionR',
+        'partialBookingTargetRR',
+        'microstructureMinRvol',
+        'microstructureMaxWick',
+        'microstructureMinKer'
       ];
       numericKeys.forEach((k) => {
         if (cleanedRisk[k] !== undefined && cleanedRisk[k] !== '') {
@@ -128,6 +134,9 @@ const Settings: React.FC = () => {
       if (cleanedRisk.maxDailyTrades) {
         usePaperTradingStore.getState().setMaxDailyTrades(Number(cleanedRisk.maxDailyTrades));
       }
+      if (cleanedRisk.pullbackEntryEnabled !== undefined) {
+        usePaperTradingStore.getState().setPullbackEntryEnabled(Boolean(cleanedRisk.pullbackEntryEnabled));
+      }
 
       await window.electronAPI?.invoke(SETTINGS_SAVE, settingsToSave);
       setSaveStatus('Saved successfully!');
@@ -149,18 +158,30 @@ const Settings: React.FC = () => {
         riskPerTrade: 700,
         maxDailyLoss: 2000,
         maxSimultaneousPositions: 4,
-        maxDailyTrades: 4,
+        maxDailyTrades: 8,
         autoSquareOff: true,
         squareOffTime: "15:15",
         defaultStopLossPercent: 1.2,
         defaultTargetPercent: 2.4,
         minConfluenceScore: 3,
-        minConfluenceScoreTrending: 3,
+        minConfluenceScoreTrending: 2,
         trendAlignmentFilter: true,
         marketRegimeFilterEnabled: true,
-        partialBookingEnabled: true,
+        marketRegimeMinADX: 20,
+        marketRegimeMinKER: 0.35,
+        pullbackEntryEnabled: false,
+        scaleInEnabled: false,
+        trailingSlEnabled: true,
+        trailingSlAtrMultiplier: 1.4,
+        trailingSlProfitCushionR: 1.2,
+        partialBookingEnabled: false,
         partialBookingTargetRR: 1.2,
         partialBookingRatio: 0.5,
+        microstructureFilterEnabled: true,
+        microstructureMinRvol: 1.2,
+        microstructureMaxWick: 0.25,
+        microstructureMinKer: 0.30,
+        microstructureMiddayGuard: true,
       }
     }));
   };
@@ -245,7 +266,7 @@ const Settings: React.FC = () => {
             <div className="mb-4 p-3 rounded-xl bg-accent/10 border border-accent/20 text-xs text-surface-300 flex items-center gap-2.5">
               <Sparkles size={16} className="text-accent-light shrink-0" />
               <span>
-                <strong>20% Sizing Rule:</strong> ₹4,000 margin/trade is calibrated for a ₹20,000 account, holding up to 4 concurrent positions with 5x MIS leverage (₹20,000 exposure each) and a 20% cash reserve.
+                <strong>Capital &amp; Margin Calibration:</strong> ₹8,000 margin/trade provides ₹40,000 exposure with 5x MIS leverage. This minimizes statutory exchange friction (₹20 flat brokerage is only ~14% of 1R instead of ~30%).
               </span>
             </div>
 
@@ -392,6 +413,119 @@ const Settings: React.FC = () => {
                 </div>
               </div>
 
+              {/* Optional Pullback Limit Entry Toggle */}
+              <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-surface-300 text-xs font-semibold">Pullback Retest Entry</label>
+                    <p className="text-[11px] text-surface-500">
+                      When enabled, the agent waits for EMA20/VWAP/POC value retests. When disabled (default), the agent executes directly on breakout triggers.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={localSettings.risk?.pullbackEntryEnabled ?? false}
+                      onChange={(e) => handleRiskChange('pullbackEntryEnabled', e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
+                  </label>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-surface-400 font-mono">
+                  <span className={!(localSettings.risk?.pullbackEntryEnabled ?? false) ? 'text-profit-light font-bold' : 'text-surface-500'}>⚡ Direct Breakout Entry (Instant)</span>
+                  <span className={(localSettings.risk?.pullbackEntryEnabled ?? false) ? 'text-accent-light font-bold' : 'text-surface-500'}>🎯 Value Pullback Retest</span>
+                </div>
+              </div>
+
+              {/* Dynamic Microstructural Quality Gate */}
+              <div className="md:col-span-2 bg-surface-900/50 p-5 rounded-2xl border border-surface-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                      <Zap size={18} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-white">Dynamic Microstructural Quality Gate</h3>
+                      <p className="text-xs text-surface-400">
+                        Rejects false-breakout traps across all stocks without hardcoded blacklisting.
+                      </p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={localSettings.risk?.microstructureFilterEnabled ?? true}
+                      onChange={(e) => handleRiskChange('microstructureFilterEnabled', e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-profit-dark"></div>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-1">
+                  <div>
+                    <label className="block text-surface-400 text-[11px] mb-1 font-medium">Min RVOL (Surge)</label>
+                    <input 
+                      type="number" 
+                      step="0.1" 
+                      value={localSettings.risk?.microstructureMinRvol ?? '1.2'} 
+                      onChange={(e) => handleRiskChange('microstructureMinRvol', e.target.value)}
+                      disabled={!(localSettings.risk?.microstructureFilterEnabled ?? true)}
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      placeholder="1.2"
+                    />
+                    <span className="text-[10px] text-surface-500 mt-0.5 block">≥ 1.2× 20-period MA</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-surface-400 text-[11px] mb-1 font-medium">Max Rejection Wick</label>
+                    <input 
+                      type="number" 
+                      step="0.05" 
+                      value={localSettings.risk?.microstructureMaxWick ?? '0.25'} 
+                      onChange={(e) => handleRiskChange('microstructureMaxWick', e.target.value)}
+                      disabled={!(localSettings.risk?.microstructureFilterEnabled ?? true)}
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      placeholder="0.25"
+                    />
+                    <span className="text-[10px] text-surface-500 mt-0.5 block">≤ 25% candle range</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-surface-400 text-[11px] mb-1 font-medium">Min Local KER (Chop)</label>
+                    <input 
+                      type="number" 
+                      step="0.05" 
+                      value={localSettings.risk?.microstructureMinKer ?? '0.30'} 
+                      onChange={(e) => handleRiskChange('microstructureMinKer', e.target.value)}
+                      disabled={!(localSettings.risk?.microstructureFilterEnabled ?? true)}
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      placeholder="0.30"
+                    />
+                    <span className="text-[10px] text-surface-500 mt-0.5 block">≥ 0.30 efficiency</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-surface-400 text-[11px] mb-1 font-medium">Midday Lull Guard</label>
+                    <div className="flex items-center h-8">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer" 
+                          checked={localSettings.risk?.microstructureMiddayGuard ?? true}
+                          onChange={(e) => handleRiskChange('microstructureMiddayGuard', e.target.checked)}
+                          disabled={!(localSettings.risk?.microstructureFilterEnabled ?? true)}
+                        />
+                        <div className="w-9 h-5 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
+                        <span className="ml-2 text-xs font-mono text-surface-300 font-semibold">11:30–13:15 IST</span>
+                      </label>
+                    </div>
+                    <span className="text-[10px] text-surface-500 mt-0.5 block">Requires RVOL ≥ 2.2×</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Default Stop Loss */}
               <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
                 <div className="flex justify-between items-center">
@@ -427,6 +561,92 @@ const Settings: React.FC = () => {
                 />
                 <p className="text-[11px] text-surface-500">
                   Target exit price for capturing gains (1:2.0 risk-reward against 1.2% stop-loss).
+                </p>
+              </div>
+
+              {/* Dynamic ATR Trailing Stop Loss */}
+              <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-surface-300 text-xs font-semibold">ATR Trailing Stop Loss</label>
+                    <p className="text-[11px] text-surface-500">
+                      Ratchets SL behind High/Low Water Mark using dynamic ATR distance.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={localSettings.risk?.trailingSlEnabled ?? true}
+                      onChange={(e) => handleRiskChange('trailingSlEnabled', e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-profit-dark"></div>
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-surface-400 text-[11px] mb-1">ATR Multiplier</label>
+                    <input 
+                      type="number" 
+                      step="0.1" 
+                      value={localSettings.risk?.trailingSlAtrMultiplier ?? '1.4'} 
+                      onChange={(e) => handleRiskChange('trailingSlAtrMultiplier', e.target.value)}
+                      disabled={!(localSettings.risk?.trailingSlEnabled ?? true)}
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      placeholder="1.4"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-surface-400 text-[11px] mb-1">Profit Cushion (R)</label>
+                    <input 
+                      type="number" 
+                      step="0.1" 
+                      value={localSettings.risk?.trailingSlProfitCushionR ?? '1.2'} 
+                      onChange={(e) => handleRiskChange('trailingSlProfitCushionR', e.target.value)}
+                      disabled={!(localSettings.risk?.trailingSlEnabled ?? true)}
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      placeholder="1.2"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-surface-500">
+                  Calibrated to 1.4× ATR with +1.2R cushion to capture trending runners without early clamp.
+                </p>
+              </div>
+
+              {/* Partial Profit Booking (+1.2R) */}
+              <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-surface-300 text-xs font-semibold">Partial Profit Booking (50% @ T1)</label>
+                    <p className="text-[11px] text-surface-500">
+                      Exits 50% at Target 1 and moves remaining SL to Breakeven.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={localSettings.risk?.partialBookingEnabled ?? false}
+                      onChange={(e) => handleRiskChange('partialBookingEnabled', e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-surface-400 text-[11px] mb-1">Target 1 Multiple (R:R)</label>
+                  <input 
+                    type="number" 
+                    step="0.1" 
+                    value={localSettings.risk?.partialBookingTargetRR ?? '1.2'} 
+                    onChange={(e) => handleRiskChange('partialBookingTargetRR', e.target.value)}
+                    disabled={!(localSettings.risk?.partialBookingEnabled ?? false)}
+                    className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                    placeholder="1.2"
+                  />
+                </div>
+                <p className="text-[10px] text-surface-500">
+                  Default Disabled: Disabling partial booking allows the full position to trail at 1.4× ATR and saves duplicate ₹20 brokerage.
                 </p>
               </div>
 

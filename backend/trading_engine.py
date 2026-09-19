@@ -562,7 +562,8 @@ class TradingEngine:
 
         try:
             risk_cfg = config_manager.get_risk_config()
-            scale_in_enabled = bool(risk_cfg.get("scaleInEnabled", True))
+            pullback_enabled = bool(risk_cfg.get("pullbackEntryEnabled", False))
+            scale_in_enabled = pullback_enabled and bool(risk_cfg.get("scaleInEnabled", False))
             leg1_ratio = float(risk_cfg.get("scaleInLeg1Ratio", 0.5))
             partial_enabled = bool(risk_cfg.get("partialBookingEnabled", True))
             target1_rr = float(risk_cfg.get("partialBookingTargetRR", 1.2))

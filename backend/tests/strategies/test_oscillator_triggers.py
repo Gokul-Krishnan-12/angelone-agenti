@@ -47,7 +47,9 @@ class TestTSICross:
         _one("tsi_cross", build_candles(_sine(20, 41)), "BUY")
 
     def test_sell_on_zero_line_cross_down(self):
-        _one("tsi_cross", build_candles(_sine(30, 50)), "SELL")
+        # sine(15, 71): TSI crosses zero from above on the last bar with an
+        # accelerating slope (confirmed: TSI 7.21 → 3.15 → -1.18, slope 4.06 → 4.33)
+        _one("tsi_cross", build_candles(_sine(15, 71)), "SELL")
 
 
 class TestStochasticReversal:

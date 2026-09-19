@@ -20,7 +20,7 @@ class ConfigManager:
                 "riskPercent": 1.0,  # 1.0% of portfolio equity risk per trade
                 "maxDailyLoss": 2000,  # raised from ₹800 → prevents premature engine shutdown after 1-2 SLs
                 "maxSimultaneousPositions": 4,
-                "maxDailyTrades": 4,
+                "maxDailyTrades": 3,  # reduced from 4 → lower fee drag; 3 high-quality trades > 4 marginal trades
                 "noNewTradesAfter": "15:00",
                 "autoSquareOff": True,
                 "squareOffTime": "15:15",
@@ -29,8 +29,9 @@ class ConfigManager:
                 "positionRevalWeakExitMins": 15,
                 "positionRevalBreakevenMins": 20,  # idle trade circuit breaker stagnation timeout (20 mins)
                 # ── Quality filters ──────────────────────────────────
-                "minConfluenceScore": 3,  # 3 independent families required for all regimes
-                "minConfluenceScoreTrending": 3,  # raised to 3 families in all regimes (trending & choppy)
+                # Backtest evidence: 2-family gate → ₹48k net profit; 3-family gate → ₹4k net (same symbols/period)
+                "minConfluenceScore": 2,  # 2 independent families required (choppy regime)
+                "minConfluenceScoreTrending": 2,  # 2 families in trending regimes — unlocks high-alpha strategy suite
                 "minRiskReward": 2.0,  # minimum 1:2 R:R ratio for any trade
                 "minStopLossPercent": 1.2,  # minimum 1.2% SL width to prevent noise stop-outs
                 "maxStopLossPercent": 2.4,  # maximum 2.4% SL cap to prevent outsized losses
@@ -44,48 +45,54 @@ class ConfigManager:
                 "marketRegimeBlockChoppyBreakouts": True,  # suppress false-breakout churn in chop
                 # ── Trailing stop-loss ────────────────────────────
                 "trailingSlEnabled": True,  # enable ATR trailing SL
-                "trailingSlAtrMultiplier": 2.2,  # ATR multiplier for trailing distance
-                "trailingSlProfitCushionR": 1.0,  # trail after reaching +1.0R profit (prevents premature choking)
+                "trailingSlAtrMultiplier": 1.4,  # ATR multiplier for trailing distance (1.4× allows trailing to lock profit before 2R target)
+                "trailingSlProfitCushionR": 1.2,  # trail after reaching +1.2R profit (prevents premature choking)
                 # ── Partial Profit Booking ────────────────────────
-                "partialBookingEnabled": True,  # book 50% at Target 1 and move SL to breakeven
+                "partialBookingEnabled": False,  # False = let full position run with 1.4x ATR trailing SL; True = book 50% at Target 1
                 "partialBookingRatio": 0.5,  # 50% quantity exit at Target 1
                 "partialBookingMinProfit": 250.0,  # minimum ₹250 gain to justify extra ₹20 brokerage order
-                "partialBookingTargetRR": 1.0,  # front-load Target 1 at +1.0R (covers round-trip friction)
-                # ── 2-Leg Scale-In Entry ─────────────────────────
-                "scaleInEnabled": True,  # 50% qty at breakout, 50% on EMA20/VWAP pullback → improves avg entry
+                "partialBookingTargetRR": 1.2,  # front-load Target 1 at +1.2R (covers round-trip friction)
+                # ── 2-Leg Scale-In & Pullback Entry ─────────────
+                "pullbackEntryEnabled": False,  # False = Direct breakout entry (immediate execution); True = Wait for value pullback (EMA20/VWAP/POC)
+                "scaleInEnabled": False,  # 50% qty at breakout, 50% on EMA20/VWAP pullback → improves avg entry
                 "scaleInLeg1Ratio": 0.5,  # fraction of calculated qty placed as Leg 1
                 "scaleInLeg2TimeoutMultiplier": 2,  # Leg 2 waits 2× pendingOrderTimeoutSeconds before being skipped
+                # ── Dynamic Microstructural Quality Gate ────────
+                "microstructureFilterEnabled": True,  # dynamic false-breakout rejection gate
+                "microstructureMinRvol": 1.2,  # trigger bar volume >= 1.2x 20-period MA
+                "microstructureMaxWick": 0.25,  # rejection wick <= 25% of candle range
+                "microstructureMinKer": 0.30,  # 20-period local KER >= 0.30 (blocks chop traps)
+                "microstructureMiddayGuard": True,  # enforces RVOL >= 2.2x during 11:30 - 13:15 IST
             },
             "strategies": {
-                # ── Top alpha strategies: breakout, structure, volume ──
-                "donchian_breakout": {"enabled": True},
-                "keltner_breakout": {"enabled": True},
-                "bollinger_breakout": {"enabled": True},
-                "volume_delta_divergence": {"enabled": True},
-                "cmf_accumulation": {"enabled": True},
-                "liquidity_grab_reversal": {"enabled": True},
-                "gap_fill": {"enabled": True},
-                "fixed_range_volume_profile": {"enabled": True},
-                # ── Negative alpha on 5m intraday ──
-                "institutional_absorption": {"enabled": False},  # -₹3,226 drag on 5m
-                "cpr_breakout_reversal": {"enabled": False},  # Whipsaws on 5m rolling windows
-                "order_block_fvg": {"enabled": False},  # Whipsaw prone on 5m
-                "opening_range_breakout": {"enabled": False},  # False breakout chop in opening 15m
-                # ── Pruned lagging indicators & negative expectancy oscillators ──
-                "psar_trend": {"enabled": False},  # -₹8,575 P&L in backtests
-                "ema_crossover": {"enabled": False},  # -₹2,201 P&L in backtests
-                "macd_cross": {"enabled": False},  # Flat/negative fee drag
-                "supertrend": {"enabled": False},  # Whipsaw prone on 15m
-                "tsi_cross": {"enabled": True},  # consistent positive alpha: +₹5,575/+₹7,967 across backtests
-                "awesome_oscillator": {"enabled": False},
-                "stoc_rsi": {"enabled": False},
-                "stochastic_reversal": {"enabled": False},
-                "mfi_exhaustion": {"enabled": False},
-                "williams_r": {"enabled": False},  # 56.8% SL rate, -₹2,446 P&L
-                "cci_reversal": {"enabled": False},  # 63.3% SL rate, -₹1,813 P&L
-                "adx_momentum": {"enabled": False},  # 62.0% SL rate, -₹291 P&L
-                "rsi_reversal": {"enabled": False},  # 57.9% SL rate, -₹228 P&L
-                "vwap_bounce": {"enabled": False},  # 88.9% SL rate, -₹172 P&L
+                # ── Primary alpha strategies: proven net-positive across realistic backtests ──────
+                "bollinger_breakout": {"enabled": True},       # +₹15,767 on realistic 60d test
+                "donchian_breakout": {"enabled": True},        # +₹9,184 on realistic 60d test
+                "institutional_absorption": {"enabled": True}, # +₹6,760 on realistic 60d test
+                "fixed_range_volume_profile": {"enabled": True},  # +₹2,087 on realistic 60d test
+                "keltner_breakout": {"enabled": True},         # Breakout family contributor
+                "liquidity_grab_reversal": {"enabled": True},  # Reversal structural edge
+                "gap_fill": {"enabled": True},                 # High hit-rate gap fill
+                "opening_range_breakout": {"enabled": True},   # Session open momentum
+                "macd_cross": {"enabled": True},               # Confluence momentum enabler
+                "stoc_rsi": {"enabled": True},                 # Oscillator confirmation
+                # ── DISABLED: net drag strategies identified by walk-forward backtest ─────────
+                "order_block_fvg": {"enabled": False},          # -₹6,183 drag
+                "psar_trend": {"enabled": False},               # -₹11,654 drag
+                "volume_delta_divergence": {"enabled": False},  # -₹5,206 drag
+                "tsi_cross": {"enabled": False},                # -₹4,148 drag
+                "awesome_oscillator": {"enabled": False},       # -₹2,513 drag
+                "cmf_accumulation": {"enabled": False},         # -₹12,286 drag
+                "cpr_breakout_reversal": {"enabled": False},    # Whipsaws on intraday rolling windows
+                "ema_crossover": {"enabled": False},           # -₹2,201 P&L — lagging in fast markets
+                "supertrend": {"enabled": False},              # Whipsaw prone — slower ATR recalc
+                "stochastic_reversal": {"enabled": False},     # oscillator noise; covered by stoc_rsi
+                "mfi_exhaustion": {"enabled": False},          # low signal quality; high SL rate
+                "williams_r": {"enabled": False},              # 56.8% SL rate, -₹2,446 P&L
+                "cci_reversal": {"enabled": False},            # 63.3% SL rate, -₹1,813 P&L
+                "adx_momentum": {"enabled": False},            # 62.0% SL rate, -₹291 P&L
+                "rsi_reversal": {"enabled": False},            # 57.9% SL rate, -₹228 P&L
+                "vwap_bounce": {"enabled": False},             # 88.9% SL rate, -₹172 P&L
             },
             "watchlist": [
                 "RELIANCE",

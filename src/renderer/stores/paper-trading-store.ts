@@ -13,6 +13,11 @@ export interface PaperPosition {
   entryPrice: number;
   currentPrice: number;
   stopLoss: number;
+  initialSl?: number;
+  initialRisk?: number;
+  highWaterMark?: number;
+  lowWaterMark?: number;
+  atr?: number;
   target: number;
   target1?: number;
   target2?: number;
@@ -70,10 +75,12 @@ interface PaperTradingState {
   maxCapitalPerTrade: number;
   maxDailyTrades: number;
   riskPerTrade: number;
+  pullbackEntryEnabled: boolean;
   lastPaperSummaryDate: string | null;
 
   setDummyBalance: (amount: number) => void;
   setIsRunning: (running: boolean) => void;
+  setPullbackEntryEnabled: (enabled: boolean) => void;
   setMaxCapitalPerTrade: (amount: number) => void;
   setMaxDailyTrades: (amount: number) => void;
   setRiskPerTrade: (amount: number) => void;
@@ -121,6 +128,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       orders: [],
       rejectedTrades: [],
       lastPaperSummaryDate: null,
+      pullbackEntryEnabled: false,
       activityLog: [
         {
           id: 'init-1',
@@ -132,6 +140,16 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       maxCapitalPerTrade: 8000,
       maxDailyTrades: 4,
       riskPerTrade: 700,
+
+      setPullbackEntryEnabled: (enabled: boolean) => {
+        set({ pullbackEntryEnabled: enabled });
+        get().addLog(
+          'INFO',
+          enabled
+            ? '🎯 Entry Mode: Pullback Retest Enabled (Waits for EMA20/VWAP/POC value retests).'
+            : '⚡ Entry Mode: Direct Breakout Entry Enabled (Enters immediately without waiting for pullbacks).'
+        );
+      },
 
       setDummyBalance: (amount: number) => {
         const valid = Math.max(1000, Number(amount) || 100000);
@@ -252,6 +270,36 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           return false;
         }
 
+        // ── Microstructural Quality Gate (RVOL, Rejection Wick, Local KER, Midday Guard) ──
+        const sigAny = signal as any;
+        const rvol = sigAny.rvol !== undefined ? Number(sigAny.rvol) : 1.5;
+        const wickRatio = sigAny.wickRatio !== undefined ? Number(sigAny.wickRatio) : 0.15;
+        const localKer = sigAny.localKer !== undefined ? Number(sigAny.localKer) : 0.45;
+
+        if (sigAny.rvol !== undefined && rvol < 1.2) {
+          recordRejection(`Microstructure: Low RVOL (${rvol.toFixed(2)}x < 1.20x min required)`);
+          return false;
+        }
+
+        if (sigAny.wickRatio !== undefined && wickRatio > 0.25) {
+          recordRejection(`Microstructure: High Rejection Wick (${(wickRatio * 100).toFixed(1)}% > 25.0% max)`);
+          return false;
+        }
+
+        if (sigAny.localKer !== undefined && localKer < 0.30) {
+          recordRejection(`Microstructure: Sideways Chop (KER ${localKer.toFixed(2)} < 0.30 min)`);
+          return false;
+        }
+
+        // Check Midday Lull (11:30 to 13:15 IST)
+        const nowIst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+        const timeInMin = nowIst.getHours() * 60 + nowIst.getMinutes();
+        const isMiddayLull = timeInMin >= (11 * 60 + 30) && timeInMin <= (13 * 60 + 15);
+        if (isMiddayLull && sigAny.rvol !== undefined && rvol < 2.2) {
+          recordRejection(`Microstructure: Midday Liquidity Lull (RVOL ${rvol.toFixed(2)}x < 2.20x required between 11:30–13:15 IST)`);
+          return false;
+        }
+
         const todayIst = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
         const todayOrders = state.orders.filter(
           (o) => o.entryTime && new Date(o.entryTime).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === todayIst
@@ -327,15 +375,18 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           return false;
         }
 
-        // Calculate Target 1 (+1.0R) & Target 2 for front-loaded partial profit booking
+        // Calculate Target 1 (+1.2R) & Target 2 for front-loaded partial profit booking
         const riskDist = Math.abs(entryPrice - stopLoss);
+        const targetRR = Number(masterRisk?.partialBookingTargetRR) || 1.2;
         let target1: number | undefined;
         const target2 = target;
         if (riskDist > 0) {
           target1 = direction === 'BUY'
-            ? Math.round((entryPrice + riskDist * 1.0) * 100) / 100
-            : Math.round((entryPrice - riskDist * 1.0) * 100) / 100;
+            ? Math.round((entryPrice + riskDist * targetRR) * 100) / 100
+            : Math.round((entryPrice - riskDist * targetRR) * 100) / 100;
         }
+
+        const estimatedAtr = Number((signal as any).atr) || (riskDist > 0 ? riskDist / 1.4 : entryPrice * 0.012);
 
         const newPosition: PaperPosition = {
           id: posId,
@@ -346,6 +397,11 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           entryPrice,
           currentPrice: entryPrice,
           stopLoss,
+          initialSl: stopLoss,
+          initialRisk: riskDist,
+          highWaterMark: entryPrice,
+          lowWaterMark: entryPrice,
+          atr: estimatedAtr,
           target,
           target1,
           target2,
@@ -380,9 +436,10 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           window.electronAPI.ticker.subscribe([cleanSymbol as any]);
         }
 
+        const modeTag = state.pullbackEntryEnabled ? '🎯 Pullback Retest' : '⚡ Direct Entry';
         get().addLog(
           'EXECUTE',
-          `Virtual ${direction} executed: ${quantity} shares of ${cleanSymbol} @ ₹${entryPrice.toFixed(2)} [Target: ₹${target.toFixed(2)}, SL: ₹${stopLoss.toFixed(2)}] via ${signal.strategy}`
+          `Virtual ${direction} executed: ${quantity} shares of ${cleanSymbol} @ ₹${entryPrice.toFixed(2)} (${modeTag}) [Target: ₹${target.toFixed(2)}, SL: ₹${stopLoss.toFixed(2)}] via ${signal.strategy}`
         );
         return true;
       },
@@ -421,9 +478,61 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           const pnlPercent = ((effectivePrice - pos.entryPrice) / pos.entryPrice) * 100 * (isBuy ? 1 : -1);
 
           let currentPos = { ...pos };
+          const masterRisk = useTradingStore.getState().settings?.risk;
 
-          // ── Check Target 1 (+1.2R Partial Profit Booking) ───────────
-          if (currentPos.target1 && !currentPos.partialBooked && currentPos.quantity >= 2) {
+          // ── Dynamic ATR Trailing Stop-Loss Ratchet (1.4x ATR behind HWM/LWM) ──
+          const trailingSlEnabled = masterRisk?.trailingSlEnabled ?? true;
+          const trailingAtrMult = Number(masterRisk?.trailingSlAtrMultiplier) || 1.4;
+          const trailingCushionR = Number(masterRisk?.trailingSlProfitCushionR) || 1.2;
+
+          if (trailingSlEnabled && currentPos.atr && currentPos.atr > 0) {
+            const initialSl = currentPos.initialSl || currentPos.stopLoss;
+            const tradeRisk = currentPos.initialRisk || Math.abs(currentPos.entryPrice - initialSl) || (currentPos.entryPrice * 0.012);
+            const profitThreshold = tradeRisk * trailingCushionR;
+            const distance = currentPos.atr * trailingAtrMult;
+
+            if (isBuy) {
+              const hwm = Math.max(currentPos.highWaterMark || currentPos.entryPrice, effectivePrice);
+              currentPos.highWaterMark = hwm;
+              if ((hwm - currentPos.entryPrice) >= profitThreshold) {
+                let trailCandidate = hwm - distance;
+                if ((hwm - currentPos.entryPrice) >= 1.5 * tradeRisk) {
+                  trailCandidate = Math.max(trailCandidate, currentPos.entryPrice);
+                }
+                trailCandidate = Math.round(trailCandidate * 100) / 100;
+                if (trailCandidate > currentPos.stopLoss) {
+                  const oldSl = currentPos.stopLoss;
+                  currentPos.stopLoss = trailCandidate;
+                  logsToAdd.push({
+                    type: 'ORDER',
+                    message: `📈 TRAILING SL RATCHET: ${currentPos.tradingsymbol} SL raised ₹${oldSl.toFixed(2)} ➔ ₹${currentPos.stopLoss.toFixed(2)} (HWM: ₹${hwm.toFixed(2)})`
+                  });
+                }
+              }
+            } else {
+              const lwm = Math.min(currentPos.lowWaterMark || currentPos.entryPrice, effectivePrice);
+              currentPos.lowWaterMark = lwm;
+              if ((currentPos.entryPrice - lwm) >= profitThreshold) {
+                let trailCandidate = lwm + distance;
+                if ((currentPos.entryPrice - lwm) >= 1.5 * tradeRisk) {
+                  trailCandidate = Math.min(trailCandidate, currentPos.entryPrice);
+                }
+                trailCandidate = Math.round(trailCandidate * 100) / 100;
+                if (trailCandidate < currentPos.stopLoss) {
+                  const oldSl = currentPos.stopLoss;
+                  currentPos.stopLoss = trailCandidate;
+                  logsToAdd.push({
+                    type: 'ORDER',
+                    message: `📈 TRAILING SL RATCHET: ${currentPos.tradingsymbol} SL lowered ₹${oldSl.toFixed(2)} ➔ ₹${currentPos.stopLoss.toFixed(2)} (LWM: ₹${lwm.toFixed(2)})`
+                  });
+                }
+              }
+            }
+          }
+
+          // ── Check Target 1 (Partial Profit Booking, if enabled) ───────────
+          const partialBookingEnabled = masterRisk?.partialBookingEnabled ?? false;
+          if (partialBookingEnabled && currentPos.target1 && !currentPos.partialBooked && currentPos.quantity >= 2) {
             const hitTarget1 = isBuy
               ? effectivePrice >= currentPos.target1
               : effectivePrice <= currentPos.target1;
@@ -448,7 +557,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
                   ...currentPos,
                   quantity: remainingQty,
                   marginUsed: Math.max(0, currentPos.marginUsed - releasedMargin),
-                  stopLoss: beSl, // Move SL to Breakeven!
+                  stopLoss: Math.max(currentPos.stopLoss, beSl), // Move SL to Breakeven!
                   target: currentPos.target2 || currentPos.target,
                   partialBooked: true
                 };
@@ -468,10 +577,15 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 
           // Check Target condition (Target 2 or full target)
           const targetHit = isBuy ? effectivePrice >= currentPos.target : effectivePrice <= currentPos.target;
-          // Check Stop Loss condition (Breakeven SL if partial booked, else initial SL)
+          // Check Stop Loss condition (Trailing SL or Breakeven SL or Initial SL)
           const slHit = isBuy ? effectivePrice <= currentPos.stopLoss : effectivePrice >= currentPos.stopLoss;
 
           if (targetHit || slHit) {
+            const isTrailingSl = !targetHit && (
+              (isBuy && currentPos.stopLoss > currentPos.entryPrice) ||
+              (!isBuy && currentPos.stopLoss < currentPos.entryPrice)
+            );
+            const isBreakeven = currentPos.partialBooked && Math.abs(effectivePrice - currentPos.entryPrice) < currentPos.entryPrice * 0.002;
             const exitReason: 'TARGET_HIT' | 'STOPLOSS_HIT' = targetHit ? 'TARGET_HIT' : 'STOPLOSS_HIT';
             balanceDelta += currentPos.marginUsed + currentPnl;
 
@@ -493,8 +607,12 @@ export const usePaperTradingStore = create<PaperTradingState>()(
                 type: 'TARGET',
                 message: `🎯 TARGET HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}! Virtual Profit: +₹${currentPnl.toFixed(2)} (+${currentPnlPercent.toFixed(2)}%)`
               });
+            } else if (isTrailingSl) {
+              logsToAdd.push({
+                type: 'TARGET',
+                message: `🚀 TRAILING STOP HIT: ${currentPos.tradingsymbol} closed at ₹${effectivePrice.toFixed(2)} in profit! Net P&L: +₹${currentPnl.toFixed(2)} (+${currentPnlPercent.toFixed(2)}%)`
+              });
             } else {
-              const isBreakeven = currentPos.partialBooked && Math.abs(effectivePrice - currentPos.entryPrice) < currentPos.entryPrice * 0.002;
               logsToAdd.push({
                 type: 'STOPLOSS',
                 message: isBreakeven

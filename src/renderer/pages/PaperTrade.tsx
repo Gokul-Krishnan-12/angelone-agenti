@@ -34,8 +34,10 @@ const PaperTrade: React.FC = () => {
   const maxDailyTrades = usePaperTradingStore((s) => s.maxDailyTrades) || 8;
   const riskPerTrade = usePaperTradingStore((s) => s.riskPerTrade) || 500;
   const rejectedTrades = usePaperTradingStore((s) => s.rejectedTrades) || [];
+  const pullbackEntryEnabled = usePaperTradingStore((s) => s.pullbackEntryEnabled);
   const setMaxDailyTrades = usePaperTradingStore((s) => s.setMaxDailyTrades);
   const setRiskPerTrade = usePaperTradingStore((s) => s.setRiskPerTrade);
+  const setPullbackEntryEnabled = usePaperTradingStore((s) => s.setPullbackEntryEnabled);
   const setIsRunning = usePaperTradingStore((s) => s.setIsRunning);
   const setDummyBalance = usePaperTradingStore((s) => s.setDummyBalance);
   const setMaxCapitalPerTrade = usePaperTradingStore((s) => s.setMaxCapitalPerTrade);
@@ -81,7 +83,8 @@ const PaperTrade: React.FC = () => {
   const targetHitCount = closedOrders.filter((o) => o.status === 'TARGET_HIT').length;
   const slHitCount = closedOrders.filter((o) => o.status === 'STOPLOSS_HIT').length;
   const autoSquaredOffCount = closedOrders.filter((o) => o.status === 'AUTO_SQUARE_OFF').length;
-  const winRate = closedOrders.length > 0 ? (targetHitCount / closedOrders.length) * 100 : 0;
+  const winningOrdersCount = closedOrders.filter((o) => o.status === 'TARGET_HIT' || (o.pnl !== undefined && o.pnl > 0)).length;
+  const winRate = closedOrders.length > 0 ? (winningOrdersCount / closedOrders.length) * 100 : 0;
 
   const handleUpdateBalance = (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,6 +139,20 @@ const PaperTrade: React.FC = () => {
 
         {/* Top Controls */}
         <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Entry Mode Toggle Button */}
+          <button
+            onClick={() => setPullbackEntryEnabled(!pullbackEntryEnabled)}
+            className={`flex items-center gap-1.5 px-3.5 py-2 border rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
+              pullbackEntryEnabled
+                ? 'bg-accent/20 hover:bg-accent/30 text-accent-light border-accent/40'
+                : 'bg-surface-800 hover:bg-surface-750 text-profit-light border-profit/30'
+            }`}
+            title={pullbackEntryEnabled ? 'Pullback Retest Active: Waiting for EMA20/VWAP/POC retest before entering' : 'Direct Breakout Entry Active: Entering immediately at market price'}
+          >
+            {pullbackEntryEnabled ? <Target size={14} className="text-accent-light" /> : <Zap size={14} className="text-profit-light" />}
+            <span>Entry: {pullbackEntryEnabled ? '🎯 Pullback Retest' : '⚡ Direct Breakout'}</span>
+          </button>
+
           <button
             onClick={() => setShowBalanceModal(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-surface-800 hover:bg-surface-750 text-surface-200 hover:text-white border border-surface-700 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer"
@@ -779,6 +796,29 @@ const PaperTrade: React.FC = () => {
                 <p className="text-[10px] text-surface-500">
                   Defines the constant 1R loss budget. Position quantity is sized so losses on SL hits equal exactly this amount.
                 </p>
+              </div>
+
+              {/* Entry Strategy Option */}
+              <div className="bg-surface-900/60 p-3 rounded-xl border border-surface-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-xs text-surface-300 font-semibold">Entry Execution Strategy</label>
+                    <p className="text-[10px] text-surface-500">Choose between immediate breakout execution or conservative pullback retest.</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={pullbackEntryEnabled}
+                      onChange={(e) => setPullbackEntryEnabled(e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
+                  </label>
+                </div>
+                <div className="flex items-center justify-between text-[10px] font-mono">
+                  <span className={!pullbackEntryEnabled ? 'text-profit-light font-bold' : 'text-surface-400'}>⚡ Direct Breakout (Instant)</span>
+                  <span className={pullbackEntryEnabled ? 'text-accent-light font-bold' : 'text-surface-400'}>🎯 Pullback Retest</span>
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

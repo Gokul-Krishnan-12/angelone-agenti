@@ -76,6 +76,7 @@ This repository is an **agentic intraday algorithmic trading desktop application
 | [backend/risk_manager.py](file:///home/gokul/Desktop/angelone-agenti/backend/risk_manager.py) | Singleton `RiskManager`. Enforces 1R position sizing, daily loss caps (₹800), daily trade count caps (8 trades/day), market hours gating, and ATR trailing SL logic. |
 | [backend/scanner.py](file:///home/gokul/Desktop/angelone-agenti/backend/scanner.py) | Multi-strategy scanner. Coordinates all 26 strategies, groups votes by signal family, applies confluence, trend alignment (50 EMA), regime, and 1:2 R:R geometry gates. |
 | [backend/screener.py](file:///home/gokul/Desktop/angelone-agenti/backend/screener.py) | Dynamic macro universe screener. Evaluates Kaufman Efficiency Ratio (KER $\ge 0.28$), 20-day turnover ($\ge ₹40\text{ Cr}$), ATR% ($\ge 1.5\%$), and morning RVOL ($\ge 1.8$). |
+| [backend/microstructure.py](file:///home/gokul/Desktop/angelone-agenti/backend/microstructure.py) | Dynamic Microstructural Quality Gate. Evaluates trigger candle RVOL ($\ge 1.2\times$), adverse rejection wick ($\le 25\%$), local KER ($\ge 0.30$), and midday lull liquidity surge ($\ge 2.2\times$ between 11:30–13:15 IST) to eliminate false positives across all stocks without brittle static blacklisting. |
 | [backend/market_regime.py](file:///home/gokul/Desktop/angelone-agenti/backend/market_regime.py) | Quantitative market regime classifier (`TRENDING_BULL`, `TRENDING_BEAR`, `CHOPPY_RANGE`, `VOLATILE_EXPANSION`) using ADX, KER, 50 EMA, and Bollinger Band squeeze width. |
 | [backend/market_hours.py](file:///home/gokul/Desktop/angelone-agenti/backend/market_hours.py) | Indian exchange market hours validator (09:15–15:30 IST), intraday cutoff detector (15:00/15:15 IST), and dynamic exchange trading holiday fetcher with disk cache. |
 | [backend/notifier.py](file:///home/gokul/Desktop/angelone-agenti/backend/notifier.py) | Asynchronous Telegram alert dispatcher using thread pool executors for trade exits, partial bookings, and EOD summaries. |
@@ -135,7 +136,11 @@ The core engine is encapsulated in [backend/trading_engine.py](file:///home/goku
   3. Confluence score $\ge 2$ in `TRENDING_BULL`/`TRENDING_BEAR` regime; $\ge 3$ in `CHOPPY_RANGE` or unknown regime.
   4. Symbol is not already an open active trade.
 
-### 4.3 Two-Legged Order Routing & Pending Timeout
+### 4.3 Order Routing & Optional Pullback Entry Architecture
+- **Direct Breakout Entry (Default, `pullbackEntryEnabled: False`)**: Orders are executed immediately at the current market/breakout trigger price to prevent missing fast explosive momentum runs.
+- **Pullback Retest Entry (Optional, `pullbackEntryEnabled: True`)**: When enabled via Agent Control, Paper Trading Sandbox, or Settings screens, the scanner anchors limit orders to nearest value support/resistance levels (EMA20/VWAP/POC) before entering.
+- **Optional Two-Legged Scale-In (`scaleInEnabled: True`)**: When scale-in is active, places 50% qty at breakout and 50% at EMA20/VWAP pullback.
+
 ```
 Signal Triggered
        │
@@ -143,22 +148,16 @@ Signal Triggered
 1R Position Sizer (max ₹8,000 margin, 5x MIS → ₹40k exposure; 1R budget = ₹700)
        │
        ▼
-LEG 1: LIMIT order for 50% qty at nearest value level (max(VWAP, EMA20, BreakoutLevel))
+[Direct Breakout Entry: Full Qty @ Close/LTP]  OR  [Pullback Mode: Limit @ Value Support/POC]
        │
        ├─► Sits in pending_orders (max 15 seconds TTL)
        │         │
        │         ├─► On COMPLETE fill:
        │         │         │
        │         │         ▼
-       │         │   Place Native Exchange STOPLOSS_LIMIT for Leg 1 qty (full risk protection)
-       │         │         │
-       │         │         ▼
-       │         │   LEG 2: LIMIT order for remaining 50% qty at pullback (max(VWAP, EMA20))
-       │         │         │
-       │         │         ├─► On Leg 2 fill → compute weighted average entry; update active_trades
-       │         │         └─► On Leg 2 timeout (2× normal TTL) → Leg 1 runs as normal position
+       │         │   Place Native Exchange STOPLOSS_LIMIT for full qty (full risk protection)
        │         │
-       │         └─► If Leg 1 unfilled after 15s ──► smart_api_client.cancel_order()
+       │         └─► If unfilled after 15s ──► smart_api_client.cancel_order()
        │
        └─► Add to active_trades & persist to disk
 ```
@@ -274,9 +273,15 @@ Every candidate signal must clear the following sequentially:
    - `BUY` signals require $\text{Close} \ge 50\text{ EMA}$.
    - `SELL` signals require $\text{Close} \le 50\text{ EMA}$.
 3. **Adaptive Confluence Gate**: $\text{Confluence Score} \ge 3$ independent signal families across all regimes.
-4. **Market Regime Gate**: `is_trade_allowed_by_regime()` verifies current symbol regime. In `CHOPPY_RANGE`, all Breakout and Trend continuation setups are strictly inhibited.
-5. **Stop-Loss Floor & Cap**: Enforces a minimum $1.0\%$ stop-loss width to prevent noise stop-outs, and a maximum $1.8\%$ stop-loss cap to prevent outsized tail-risk losses.
-6. **1:2 R:R Geometry Target**: Targets are recalculated to guarantee at least $1:2$ Risk-to-Reward ratio against the calibrated SL buffer.
+4. **Dynamic Microstructural Quality Gate** ([backend/microstructure.py](file:///home/gokul/Desktop/angelone-agenti/backend/microstructure.py)):
+   - **Relative Volume**: Trigger candle $\text{RVOL} \ge 1.2\times$ (rejects low-volume retail breakout traps).
+   - **Rejection Wick Cap**: Adverse rejection wick $\le 25\%$ of total candle range (rejects buying into institutional ceiling supply or selling into floor demand).
+   - **Local Kaufman Efficiency (KER)**: 20-bar local $\text{KER} \ge 0.30$ (rejects micro-choppy consolidations).
+   - **Midday Lull Protection**: Between 11:30 and 13:15 IST, requires high institutional conviction ($\text{RVOL} \ge 2.2\times$), guarding against low-liquidity midday stop-hunts.
+   - *Triad Synchronization*: Enforced symmetrically across Live Scanner (`backend/scanner.py`), Paper Trading Sandbox (`src/renderer/stores/paper-trading-store.ts`), and Walk-Forward Backtester (`backend/backtest/engine.py`). Eliminates the need for brittle static stock blacklists.
+5. **Market Regime Gate**: `is_trade_allowed_by_regime()` verifies current symbol regime. In `CHOPPY_RANGE`, all Breakout and Trend continuation setups are strictly inhibited.
+6. **Stop-Loss Floor & Cap**: Enforces a minimum $1.0\%$ stop-loss width to prevent noise stop-outs, and a maximum $1.8\%$ stop-loss cap to prevent outsized tail-risk losses.
+7. **1:2 R:R Geometry Target**: Targets are recalculated to guarantee at least $1:2$ Risk-to-Reward ratio against the calibrated SL buffer.
 
 ### 6.3 Active Alpha Strategies vs Pruned Strategies
 Based on walk-forward backtest analysis under Indian statutory friction:
