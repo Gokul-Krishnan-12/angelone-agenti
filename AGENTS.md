@@ -441,7 +441,7 @@ Built with **React 18**, **TypeScript**, **Tailwind CSS**, and **Zustand**.
 - [Dashboard.tsx](file:///home/gokul/Desktop/angelone-agenti/src/renderer/pages/Dashboard.tsx): Margin health, realized/unrealized P&L, daily win rate, quick action controls.
 - [AgentControl.tsx](file:///home/gokul/Desktop/angelone-agenti/src/renderer/pages/AgentControl.tsx): Master agent cockpit, Mode toggle (Auto/Confirm), streaming Confluence Signal Cards with 1-click execution, live activity logs.
 - [Orders.tsx](file:///home/gokul/Desktop/angelone-agenti/src/renderer/pages/Orders.tsx): Live order book, open positions, closed trade history.
-- [PaperTrade.tsx](file:///home/gokul/Desktop/angelone-agenti/src/renderer/pages/PaperTrade.tsx): Real-time simulated paper trading engine with synthetic execution, SL/TP simulation, session statistics, sandbox activity logs, and a dedicated Rejected Setups tab with 1-click clearance.
+- [PaperTrade.tsx](file:///home/gokul/Desktop/angelone-agenti/src/renderer/pages/PaperTrade.tsx): Real-time simulated paper trading engine with synthetic execution, SL/TP simulation, session statistics, sandbox activity logs, a dedicated Rejected Setups tab with 1-click clearance, and an interactive **P&L Calendar subpage** ([PaperTradingCalendar.tsx](file:///home/gokul/Desktop/angelone-agenti/src/renderer/components/PaperTradingCalendar.tsx)) with daily returns, friction accounting, win ratios, and trade drilldown drawers.
 - [Settings.tsx](file:///home/gokul/Desktop/angelone-agenti/src/renderer/pages/Settings.tsx): SmartAPI credentials modal, risk management sliders, strategy toggles, Telegram configuration, watchlist editor.
 - [SystemGuide.tsx](file:///home/gokul/Desktop/angelone-agenti/src/renderer/pages/SystemGuide.tsx): Comprehensive interactive architectural guide explaining every strategy, confluence, KER screener, and friction guard.
 - [SwingScreener.tsx](file:///home/gokul/Desktop/angelone-agenti/src/renderer/pages/SwingScreener.tsx): Multi-day swing trade candidate finder.
@@ -449,7 +449,7 @@ Built with **React 18**, **TypeScript**, **Tailwind CSS**, and **Zustand**.
 
 ### 10.2 Zustand Stores
 - [trading-store.ts](file:///home/gokul/Desktop/angelone-agenti/src/renderer/stores/trading-store.ts): Manages live trading state, pending confluence signals, open positions, settings, and agent status.
-- [paper-trading-store.ts](file:///home/gokul/Desktop/angelone-agenti/src/renderer/stores/paper-trading-store.ts): Full in-memory paper trading simulation with local persistence (`localStorage`), simulated fills, and automated P&L tracking.
+- [paper-trading-store.ts](file:///home/gokul/Desktop/angelone-agenti/src/renderer/stores/paper-trading-store.ts): Full in-memory paper trading simulation with local persistence (`localStorage`), simulated fills, automated P&L tracking, multi-leg partial profit booking aggregation (Target 1 booked profit + runner leg profit), and daily Telegram reports.
 
 ---
 

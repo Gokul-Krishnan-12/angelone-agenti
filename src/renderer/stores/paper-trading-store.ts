@@ -22,6 +22,9 @@ export interface PaperPosition {
   target1?: number;
   target2?: number;
   partialBooked?: boolean;
+  partialPnl?: number;
+  partialExitPrice?: number;
+  partialExitQty?: number;
   originalQuantity?: number;
   strategy: string;
   entryTime: string;
@@ -35,6 +38,7 @@ export interface PaperOrder {
   tradingsymbol: string;
   direction: 'BUY' | 'SELL';
   quantity: number;
+  originalQuantity?: number;
   entryPrice: number;
   exitPrice?: number;
   status: 'OPEN' | 'TARGET_HIT' | 'STOPLOSS_HIT' | 'MANUAL_EXIT' | 'AUTO_SQUARE_OFF';
@@ -43,6 +47,11 @@ export interface PaperOrder {
   pnlPercent?: number;
   entryTime: string;
   exitTime?: string;
+  partialBooked?: boolean;
+  partialPnl?: number;
+  partialExitPrice?: number;
+  partialExitQty?: number;
+  exitReason?: string;
 }
 
 export interface PaperRejectedTrade {
@@ -553,14 +562,31 @@ export const usePaperTradingStore = create<PaperTradingState>()(
                   ? Math.round(currentPos.entryPrice * 1.0005 * 100) / 100
                   : Math.round(currentPos.entryPrice * 0.9995 * 100) / 100;
 
+                const roundedPartialPnl = Math.round(partialPnl * 100) / 100;
                 currentPos = {
                   ...currentPos,
                   quantity: remainingQty,
                   marginUsed: Math.max(0, currentPos.marginUsed - releasedMargin),
                   stopLoss: Math.max(currentPos.stopLoss, beSl), // Move SL to Breakeven!
                   target: currentPos.target2 || currentPos.target,
-                  partialBooked: true
+                  partialBooked: true,
+                  partialPnl: roundedPartialPnl,
+                  partialExitPrice: effectivePrice,
+                  partialExitQty: exitQty
                 };
+
+                // Also immediately update the open order with partial booking metrics
+                const openOrdIdx = updatedOrders.findIndex((o) => o.tradingsymbol === currentPos.tradingsymbol && o.status === 'OPEN');
+                if (openOrdIdx >= 0) {
+                  updatedOrders[openOrdIdx] = {
+                    ...updatedOrders[openOrdIdx],
+                    partialBooked: true,
+                    partialPnl: roundedPartialPnl,
+                    partialExitPrice: effectivePrice,
+                    partialExitQty: exitQty,
+                    originalQuantity: currentPos.originalQuantity || (remainingQty + exitQty)
+                  };
+                }
 
                 logsToAdd.push({
                   type: 'TARGET',
@@ -587,7 +613,14 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             );
             const isBreakeven = currentPos.partialBooked && Math.abs(effectivePrice - currentPos.entryPrice) < currentPos.entryPrice * 0.002;
             const exitReason: 'TARGET_HIT' | 'STOPLOSS_HIT' = targetHit ? 'TARGET_HIT' : 'STOPLOSS_HIT';
-            balanceDelta += currentPos.marginUsed + currentPnl;
+            
+            const remainingPnl = currentPnl;
+            const totalTradePnl = (currentPos.partialPnl || 0) + remainingPnl;
+            const fullInitialQty = currentPos.originalQuantity || (currentPos.quantity + (currentPos.partialExitQty || 0));
+            const totalInvested = currentPos.entryPrice * fullInitialQty;
+            const totalTradePnlPercent = totalInvested > 0 ? (totalTradePnl / totalInvested) * 100 : currentPnlPercent;
+
+            balanceDelta += currentPos.marginUsed + remainingPnl;
 
             // Update matching order
             const ordIdx = updatedOrders.findIndex((o) => o.tradingsymbol === currentPos.tradingsymbol && o.status === 'OPEN');
@@ -596,8 +629,14 @@ export const usePaperTradingStore = create<PaperTradingState>()(
                 ...updatedOrders[ordIdx],
                 status: exitReason,
                 exitPrice: effectivePrice,
-                pnl: Math.round(currentPnl * 100) / 100,
-                pnlPercent: Math.round(currentPnlPercent * 100) / 100,
+                quantity: fullInitialQty,
+                pnl: Math.round(totalTradePnl * 100) / 100,
+                pnlPercent: Math.round(totalTradePnlPercent * 100) / 100,
+                partialBooked: currentPos.partialBooked,
+                partialPnl: currentPos.partialPnl,
+                partialExitPrice: currentPos.partialExitPrice,
+                partialExitQty: currentPos.partialExitQty,
+                exitReason: targetHit ? 'TARGET' : (currentPos.partialBooked ? 'BREAKEVEN' : 'STOPLOSS'),
                 exitTime: new Date().toISOString()
               };
             }
@@ -605,19 +644,19 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             if (targetHit) {
               logsToAdd.push({
                 type: 'TARGET',
-                message: `🎯 TARGET HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}! Virtual Profit: +₹${currentPnl.toFixed(2)} (+${currentPnlPercent.toFixed(2)}%)`
+                message: `🎯 TARGET HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}! Virtual Profit: +₹${totalTradePnl.toFixed(2)} (+${totalTradePnlPercent.toFixed(2)}%)`
               });
             } else if (isTrailingSl) {
               logsToAdd.push({
                 type: 'TARGET',
-                message: `🚀 TRAILING STOP HIT: ${currentPos.tradingsymbol} closed at ₹${effectivePrice.toFixed(2)} in profit! Net P&L: +₹${currentPnl.toFixed(2)} (+${currentPnlPercent.toFixed(2)}%)`
+                message: `🚀 TRAILING STOP HIT: ${currentPos.tradingsymbol} closed at ₹${effectivePrice.toFixed(2)} in profit! Net P&L: +₹${totalTradePnl.toFixed(2)} (+${totalTradePnlPercent.toFixed(2)}%)`
               });
             } else {
               logsToAdd.push({
                 type: 'STOPLOSS',
                 message: isBreakeven
-                  ? `🛡 BREAKEVEN EXIT: ${currentPos.tradingsymbol} closed at ₹${effectivePrice.toFixed(2)} with zero loss on remaining runner.`
-                  : `🛑 STOP LOSS HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}. Virtual Loss: -₹${Math.abs(currentPnl).toFixed(2)} (${currentPnlPercent.toFixed(2)}%)`
+                  ? `🛡 BREAKEVEN EXIT: ${currentPos.tradingsymbol} closed at ₹${effectivePrice.toFixed(2)} with zero loss on remaining runner. Total Trade P&L: +₹${totalTradePnl.toFixed(2)}.`
+                  : `🛑 STOP LOSS HIT: ${currentPos.tradingsymbol} hit ₹${effectivePrice.toFixed(2)}. Net P&L: ${totalTradePnl >= 0 ? '+' : ''}₹${totalTradePnl.toFixed(2)} (${totalTradePnlPercent.toFixed(2)}%)`
               });
             }
 
@@ -627,9 +666,9 @@ export const usePaperTradingStore = create<PaperTradingState>()(
               direction: currentPos.direction,
               entryPrice: currentPos.entryPrice,
               exitPrice: effectivePrice,
-              quantity: currentPos.quantity,
-              pnl: Math.round(currentPnl * 100) / 100,
-              pnlPercent: Math.round(currentPnlPercent * 100) / 100,
+              quantity: fullInitialQty,
+              pnl: Math.round(totalTradePnl * 100) / 100,
+              pnlPercent: Math.round(totalTradePnlPercent * 100) / 100,
               exitReason: targetHit ? 'TARGET' : (currentPos.partialBooked ? 'BREAKEVEN' : 'STOPLOSS'),
               mode: 'Paper Trading'
             };
@@ -670,12 +709,15 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         if (!pos) return;
 
         const isBuy = pos.direction === 'BUY';
-        const pnl = isBuy
+        const remainingPnl = isBuy
           ? (pos.currentPrice - pos.entryPrice) * pos.quantity
           : (pos.entryPrice - pos.currentPrice) * pos.quantity;
-        const pnlPercent = ((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * (isBuy ? 1 : -1);
+        const totalTradePnl = (pos.partialPnl || 0) + remainingPnl;
+        const fullInitialQty = pos.originalQuantity || (pos.quantity + (pos.partialExitQty || 0));
+        const totalInvested = pos.entryPrice * fullInitialQty;
+        const totalTradePnlPercent = totalInvested > 0 ? (totalTradePnl / totalInvested) * 100 : 0;
 
-        const returnedBalance = pos.marginUsed + pnl;
+        const returnedBalance = pos.marginUsed + remainingPnl;
 
         const updatedOrders = state.orders.map((o) => {
           if (o.tradingsymbol === pos.tradingsymbol && o.status === 'OPEN') {
@@ -683,8 +725,14 @@ export const usePaperTradingStore = create<PaperTradingState>()(
               ...o,
               status: 'MANUAL_EXIT' as const,
               exitPrice: pos.currentPrice,
-              pnl: Math.round(pnl * 100) / 100,
-              pnlPercent: Math.round(pnlPercent * 100) / 100,
+              quantity: fullInitialQty,
+              pnl: Math.round(totalTradePnl * 100) / 100,
+              pnlPercent: Math.round(totalTradePnlPercent * 100) / 100,
+              partialBooked: pos.partialBooked,
+              partialPnl: pos.partialPnl,
+              partialExitPrice: pos.partialExitPrice,
+              partialExitQty: pos.partialExitQty,
+              exitReason: 'MANUAL',
               exitTime: new Date().toISOString()
             };
           }
@@ -699,7 +747,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 
         get().addLog(
           'EXIT',
-          `Manual square off: Closed ${pos.tradingsymbol} @ ₹${pos.currentPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? '+' : ''}₹${pnl.toFixed(2)} (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`
+          `Manual square off: Closed ${pos.tradingsymbol} @ ₹${pos.currentPrice.toFixed(2)}. Realized P&L: ${totalTradePnl >= 0 ? '+' : ''}₹${totalTradePnl.toFixed(2)} (${totalTradePnlPercent >= 0 ? '+' : ''}${totalTradePnlPercent.toFixed(2)}%)`
         );
 
         // Trigger Telegram exit notification
@@ -708,9 +756,9 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           direction: pos.direction,
           entryPrice: pos.entryPrice,
           exitPrice: pos.currentPrice,
-          quantity: pos.quantity,
-          pnl: Math.round(pnl * 100) / 100,
-          pnlPercent: Math.round(pnlPercent * 100) / 100,
+          quantity: fullInitialQty,
+          pnl: Math.round(totalTradePnl * 100) / 100,
+          pnlPercent: Math.round(totalTradePnlPercent * 100) / 100,
           exitReason: 'MANUAL',
           mode: 'Paper Trading'
         };
@@ -806,12 +854,15 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           for (const pos of state.positions) {
             const isBuy = pos.direction === 'BUY';
             const effectiveExitPrice = (pos.currentPrice && pos.currentPrice > 0) ? pos.currentPrice : pos.entryPrice;
-            const pnl = isBuy
+            const remainingPnl = isBuy
               ? (effectiveExitPrice - pos.entryPrice) * pos.quantity
               : (pos.entryPrice - effectiveExitPrice) * pos.quantity;
-            const pnlPercent = ((effectiveExitPrice - pos.entryPrice) / pos.entryPrice) * 100 * (isBuy ? 1 : -1);
+            const totalTradePnl = (pos.partialPnl || 0) + remainingPnl;
+            const fullInitialQty = pos.originalQuantity || (pos.quantity + (pos.partialExitQty || 0));
+            const totalInvested = pos.entryPrice * fullInitialQty;
+            const totalTradePnlPercent = totalInvested > 0 ? (totalTradePnl / totalInvested) * 100 : 0;
 
-            balanceDelta += pos.marginUsed + pnl;
+            balanceDelta += pos.marginUsed + remainingPnl;
 
             const ordIdx = updatedOrders.findIndex((o) => o.tradingsymbol === pos.tradingsymbol && o.status === 'OPEN');
             if (ordIdx >= 0) {
@@ -819,15 +870,21 @@ export const usePaperTradingStore = create<PaperTradingState>()(
                 ...updatedOrders[ordIdx],
                 status: 'AUTO_SQUARE_OFF',
                 exitPrice: effectiveExitPrice,
-                pnl: Math.round(pnl * 100) / 100,
-                pnlPercent: Math.round(pnlPercent * 100) / 100,
+                quantity: fullInitialQty,
+                pnl: Math.round(totalTradePnl * 100) / 100,
+                pnlPercent: Math.round(totalTradePnlPercent * 100) / 100,
+                partialBooked: pos.partialBooked,
+                partialPnl: pos.partialPnl,
+                partialExitPrice: pos.partialExitPrice,
+                partialExitQty: pos.partialExitQty,
+                exitReason: 'INTRADAY_AUTO_SQUARE_OFF (3:15 PM Cutoff)',
                 exitTime: new Date().toISOString()
               };
             }
 
             logsToAdd.push({
               type: 'EXIT',
-              message: `⏰ 3:15 PM Intraday MIS Auto Square-Off: Closed ${pos.tradingsymbol} (${pos.direction}) @ ₹${effectiveExitPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? '+' : ''}₹${pnl.toFixed(2)} (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`
+              message: `⏰ 3:15 PM Intraday MIS Auto Square-Off: Closed ${pos.tradingsymbol} (${pos.direction}) @ ₹${effectiveExitPrice.toFixed(2)}. Realized P&L: ${totalTradePnl >= 0 ? '+' : ''}₹${totalTradePnl.toFixed(2)} (${totalTradePnlPercent >= 0 ? '+' : ''}${totalTradePnlPercent.toFixed(2)}%)`
             });
 
             // Trigger Telegram exit notification
@@ -836,9 +893,9 @@ export const usePaperTradingStore = create<PaperTradingState>()(
               direction: pos.direction,
               entryPrice: pos.entryPrice,
               exitPrice: effectiveExitPrice,
-              quantity: pos.quantity,
-              pnl: Math.round(pnl * 100) / 100,
-              pnlPercent: Math.round(pnlPercent * 100) / 100,
+              quantity: fullInitialQty,
+              pnl: Math.round(totalTradePnl * 100) / 100,
+              pnlPercent: Math.round(totalTradePnlPercent * 100) / 100,
               exitReason: 'INTRADAY_AUTO_SQUARE_OFF (3:15 PM Cutoff)',
               mode: 'Paper Trading'
             };
@@ -915,13 +972,30 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 );
 
 export const sanitizePaperOrder = (o: PaperOrder): PaperOrder => {
+  // Retroactively repair today's PATANJALI trade if it only recorded the remaining leg PnL (+₹712.40)
+  if (o.tradingsymbol === 'PATANJALI' && Math.abs(o.entryPrice - 382.5) < 0.1 && (o.pnl === 712.4 || !o.partialBooked)) {
+    return {
+      ...o,
+      quantity: 104,
+      originalQuantity: 104,
+      partialBooked: true,
+      partialPnl: 577.20,
+      partialExitPrice: 393.60,
+      partialExitQty: 52,
+      pnl: 1289.60,
+      pnlPercent: 3.24,
+      exitReason: 'PARTIAL_TARGET_AND_MIS_AUTO_SQUARE_OFF'
+    };
+  }
+
   // If exitPrice is corrupted by paise (> 20x entryPrice), divide by 100
   if (o.exitPrice && o.entryPrice && o.exitPrice > o.entryPrice * 20) {
     const correctedExit = Math.round((o.exitPrice / 100) * 100) / 100;
     const isBuy = o.direction === 'BUY';
+    const effectiveQty = o.originalQuantity || o.quantity;
     const pnl = isBuy
-      ? (correctedExit - o.entryPrice) * o.quantity
-      : (o.entryPrice - correctedExit) * o.quantity;
+      ? (correctedExit - o.entryPrice) * effectiveQty
+      : (o.entryPrice - correctedExit) * effectiveQty;
     const pnlPercent = ((correctedExit - o.entryPrice) / o.entryPrice) * 100 * (isBuy ? 1 : -1);
     return {
       ...o,

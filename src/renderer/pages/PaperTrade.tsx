@@ -20,8 +20,10 @@ import {
   DollarSign,
   ArrowUpRight,
   ArrowDownRight,
-  Trash2
+  Trash2,
+  Calendar
 } from 'lucide-react';
+import { PaperTradingCalendar } from '../components/PaperTradingCalendar';
 
 const PaperTrade: React.FC = () => {
   const dummyBalance = usePaperTradingStore((s) => s.dummyBalance);
@@ -60,7 +62,18 @@ const PaperTrade: React.FC = () => {
   const [customMaxTradesInput, setCustomMaxTradesInput] = useState<string>('');
   const [customRiskInput, setCustomRiskInput] = useState<string>('');
   const [showBalanceModal, setShowBalanceModal] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'rejected' | 'logs'>('positions');
+  const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'calendar' | 'rejected' | 'logs'>('positions');
+
+  const tradedDaysCount = React.useMemo(() => {
+    const days = new Set<string>();
+    orders.forEach((o) => {
+      if (o.entryTime && o.status !== 'OPEN') {
+        const d = new Date(o.entryTime).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+        days.add(d);
+      }
+    });
+    return days.size;
+  }, [orders]);
 
   // Compute metrics
   const totalMarginUsed = positions.reduce((acc, p) => acc + p.marginUsed, 0);
@@ -340,6 +353,21 @@ const PaperTrade: React.FC = () => {
             </button>
 
             <button
+              onClick={() => setActiveTab('calendar')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'calendar'
+                  ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
+                  : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+              }`}
+            >
+              <Calendar size={14} />
+              <span>P&L Calendar</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-surface-700 text-surface-200">
+                {tradedDaysCount}d
+              </span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('rejected')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'rejected'
@@ -538,7 +566,14 @@ const PaperTrade: React.FC = () => {
                           {new Date(o.entryTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </td>
                         <td className="px-5 py-3 font-bold text-white">
-                          {o.tradingsymbol}
+                          <div className="flex items-center gap-1.5">
+                            <span>{o.tradingsymbol}</span>
+                            {o.partialBooked && (
+                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                50% T1
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-5 py-3">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -551,7 +586,7 @@ const PaperTrade: React.FC = () => {
                           {o.strategy}
                         </td>
                         <td className="px-5 py-3 font-mono text-white">
-                          {o.quantity}
+                          {o.originalQuantity || o.quantity}
                         </td>
                         <td className="px-5 py-3 font-mono text-white">
                           ₹{o.entryPrice.toFixed(2)}
@@ -576,9 +611,16 @@ const PaperTrade: React.FC = () => {
                         </td>
                         <td className="px-5 py-3 font-mono font-bold text-right">
                           {o.pnl !== undefined ? (
-                            <span className={isProf ? 'text-profit-light' : 'text-loss-light'}>
-                              {isProf ? '+' : ''}₹{o.pnl.toFixed(2)}
-                            </span>
+                            <div>
+                              <span className={isProf ? 'text-profit-light' : 'text-loss-light'}>
+                                {isProf ? '+' : ''}₹{o.pnl.toFixed(2)}
+                              </span>
+                              {o.partialBooked && o.partialPnl !== undefined && (
+                                <span className="block text-[10px] font-normal text-surface-400 mt-0.5">
+                                  T1: +₹{o.partialPnl.toFixed(2)} | Runner: {o.pnl - o.partialPnl >= 0 ? '+' : ''}₹{(o.pnl - o.partialPnl).toFixed(2)}
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-surface-500 font-normal">Active</span>
                           )}
@@ -589,6 +631,13 @@ const PaperTrade: React.FC = () => {
                 </tbody>
               </table>
             )}
+          </div>
+        )}
+
+        {/* Tab: P&L Calendar */}
+        {activeTab === 'calendar' && (
+          <div className="p-4 flex-1 overflow-auto">
+            <PaperTradingCalendar orders={orders} />
           </div>
         )}
 
