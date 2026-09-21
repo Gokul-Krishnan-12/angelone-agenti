@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTradingStore } from '../stores/trading-store';
 import { usePaperTradingStore } from '../stores/paper-trading-store';
 import { SETTINGS_SAVE, TELEGRAM_TEST } from '@shared/ipc-channels';
-import { Shield, ShieldCheck, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle, Send } from 'lucide-react';
+import { Shield, ShieldCheck, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle, Send, Zap } from 'lucide-react';
 
 const Settings: React.FC = () => {
   const settings = useTradingStore((s) => s.settings);

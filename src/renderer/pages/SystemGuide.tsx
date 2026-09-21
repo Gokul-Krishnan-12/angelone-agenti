@@ -487,7 +487,7 @@ const SystemGuide: React.FC = () => {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
             <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
               <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Macro Screener</span>
-              <span className="text-base font-bold text-accent-light font-mono">KER ≥ 0.28</span>
+              <span className="text-base font-bold text-accent-light font-mono">KER ≥ 0.35</span>
             </div>
             <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
               <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Friction Guard</span>
@@ -495,15 +495,15 @@ const SystemGuide: React.FC = () => {
             </div>
             <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
               <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Daily Trade Cap</span>
-              <span className="text-base font-bold text-warning-light font-mono">Max 8-10</span>
+              <span className="text-base font-bold text-warning-light font-mono">Max 3 / Day</span>
             </div>
             <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
               <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Confluence</span>
-              <span className="text-base font-bold text-white font-mono">≥ 3 Families</span>
+              <span className="text-base font-bold text-white font-mono">Adaptive (≥2/≥3)</span>
             </div>
             <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
               <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Safety Floor</span>
-              <span className="text-base font-bold text-profit-light font-mono">1.0% Min SL</span>
+              <span className="text-base font-bold text-profit-light font-mono">1.2% Min SL</span>
             </div>
             <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
               <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Risk Geometry</span>
@@ -517,7 +517,7 @@ const SystemGuide: React.FC = () => {
           {[
             { id: 'architecture', label: 'Architecture & Schedule', icon: <Cpu size={15} /> },
             { id: 'quant_edge', label: 'Quant Edge & Screener', icon: <TrendingUp size={15} /> },
-            { id: 'strategies', label: '25 TA Strategies', count: '25', icon: <Compass size={15} /> },
+            { id: 'strategies', label: '26 TA Strategies', count: '26', icon: <Compass size={15} /> },
             { id: 'confluence', label: 'Confluence & Dynamic R:R', icon: <Layers size={15} /> },
             { id: 'friction_guard', label: 'Statutory Friction Guard', icon: <Calculator size={15} /> },
             { id: 'partial_booking', label: 'Partial Profit Booking', icon: <Split size={15} /> },
@@ -572,38 +572,38 @@ const SystemGuide: React.FC = () => {
                 {
                   step: '01',
                   title: 'Watchlist Feed',
-                  desc: 'Screens ~200 F&O stocks dynamically using Daily Kaufman Efficiency Ratio (KER N=20 ≥ 0.28). SmartAPI WebSocket streams real-time tick updates.',
-                  badge: 'KER Macro Universe'
+                  desc: 'Screens ~180+ liquid F&O equities dynamically between 09:30–14:30 IST at clock-aligned 30-minute intervals (top 35 stocks) using 20D turnover (≥ ₹40 Cr), price floor (≥ ₹150), ATR% (≥ 1.5%), KER (≥ 0.35), and morning RVOL (≥ 1.8).',
+                  badge: '30m Dynamic Universe'
                 },
                 {
                   step: '02',
-                  title: '25 TA Strategies',
-                  desc: 'Vectorized mathematical functions evaluate candles simultaneously across all active scrips in 8 independent strategy families.',
-                  badge: 'Signal Engine'
+                  title: '26 TA Strategies',
+                  desc: 'Vectorized mathematical functions evaluate candles simultaneously across all active scrips in 8 independent strategy families (Breakout, Volume, Structure, Reversal, Intraday, Trend, Momentum, Oscillator).',
+                  badge: '26-Strategy Engine'
                 },
                 {
                   step: '03',
-                  title: 'Confluence & Regime',
-                  desc: 'Requires ≥ 3 independent indicator families to agree with 50 EMA trend direction plus Market Regime gating (ADX ≥ 20, KER ≥ 0.25). All 6 oscillator strategies cluster into 1 single vote.',
-                  badge: 'Consensus Filter'
+                  title: 'Adaptive Confluence',
+                  desc: 'Requires ≥ 3 independent indicator families in CHOPPY_RANGE, relaxing to ≥ 2 families in confirmed TRENDING_BULL/BEAR (KER ≥ 0.35, ADX ≥ 20). Aligns strictly with the 50-period EMA macro trend.',
+                  badge: 'Consensus Gate'
                 },
                 {
                   step: '04',
-                  title: '1R Risk Geometry',
-                  desc: 'Enforces dynamic 1R risk-based position sizing [Q = min(floor(Risk/ΔSL), floor(Exposure/Price))], 1.0% noise buffer floor, friction guard (≥3.5x fees), and daily trade cap.',
-                  badge: '1R Quant Sizing'
+                  title: '1R Quant Sizing',
+                  desc: 'Enforces dynamic 1R risk-based position sizing [Q = min(floor(Risk/ΔSL), floor(Exposure/Price))], 1.2% noise buffer floor, statutory friction guard (≥3.5x fees), and daily trade cap (default 3/day).',
+                  badge: '1R Capital Protection'
                 },
                 {
                   step: '05',
                   title: 'Limit Queue & Timeout',
-                  desc: 'Places smart limit entry with a 20-second timeout queue. Unfilled orders are cancelled automatically to prevent stale fills on fast moves.',
-                  badge: '20s Timeout Queue'
+                  desc: 'Places limit orders near the spread with a 15-second TTL queue. Unfilled orders are cancelled automatically to prevent stale fills on fading momentum.',
+                  badge: '15s Timeout Queue'
                 },
                 {
                   step: '06',
-                  title: 'Native Exchange SL',
-                  desc: 'Submits native STOPLOSS_LIMIT order directly to the exchange upon fill, trails stop dynamically, books 50% at Target 1, and squares off at 15:15.',
-                  badge: 'Exchange-Side SL'
+                  title: 'Exchange SL & Ratchet',
+                  desc: 'Submits native STOPLOSS_LIMIT directly to exchange on fill. Trails at 1.4× ATR (+1.2R cushion), books 50% at Target 1 (+1.2R with Breakeven+Friction SL), and squares off at 15:15 IST.',
+                  badge: 'Native Exchange SL'
                 }
               ].map((item, idx) => (
                 <div
@@ -667,18 +667,18 @@ const SystemGuide: React.FC = () => {
                 </div>
               </div>
 
-              {/* Safeguard 2: 20s Pending Limit Queue */}
+              {/* Safeguard 2: 15s Pending Limit Queue */}
               <div className="p-4 rounded-xl bg-surface-900/80 border border-surface-700/80 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <Timer size={14} className="text-warning-light" /> 20s Limit Queue
+                    <Timer size={14} className="text-warning-light" /> 15s Limit Queue
                   </span>
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-800 text-warning-light border border-surface-700">
-                    TTL 20 Seconds
+                    TTL 15 Seconds
                   </span>
                 </div>
                 <p className="text-xs text-surface-300 leading-relaxed">
-                  Breakout entries are placed as Limit orders near the bid/ask spread. The engine tracks unfilled orders in an active timeout queue. If unfilled after <strong>20 seconds</strong>, the order is automatically cancelled to prevent adverse fills on fading momentum.
+                  Breakout entries are placed as Limit orders near the bid/ask spread. The engine tracks unfilled orders in an active timeout queue. If unfilled after <strong>15 seconds</strong>, the order is automatically cancelled to prevent adverse fills on fading momentum.
                 </p>
                 <div className="text-[10px] text-surface-500 font-mono pt-1">
                   Anti-Lag: Eliminates stale resting orders during market reversals.
@@ -923,11 +923,11 @@ const SystemGuide: React.FC = () => {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-[10px] uppercase font-bold text-surface-400 tracking-wider">Regime Screener</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-accent-light/10 text-accent-light border border-accent-light/20">Pre-Market</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-accent-light/10 text-accent-light border border-accent-light/20">30m Cycle</span>
                   </div>
-                  <div className="text-lg font-bold font-mono text-white mb-1">Daily KER ≥ 0.28</div>
+                  <div className="text-lg font-bold font-mono text-white mb-1">Daily KER ≥ 0.35</div>
                   <p className="text-xs text-surface-400 leading-relaxed">
-                    Evaluated daily over 20 sessions (N=20). Filters out noisy, mean-reverting chop while preserving directional momentum runners across the universe.
+                    Evaluated over 20 sessions (N=20). Filters out noisy, mean-reverting chop while isolating high-velocity directional runners across the universe.
                   </p>
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-surface-800 text-[11px] font-mono text-accent-light/80">
@@ -957,13 +957,13 @@ const SystemGuide: React.FC = () => {
                     <span className="text-[10px] uppercase font-bold text-surface-400 tracking-wider">Discipline Cap</span>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-warning-light/10 text-warning-light border border-warning-light/20">Daily RMS</span>
                   </div>
-                  <div className="text-lg font-bold font-mono text-warning-light mb-1">Max 8-10 Trades/Day</div>
+                  <div className="text-lg font-bold font-mono text-warning-light mb-1">Max 3 Trades/Day</div>
                   <p className="text-xs text-surface-400 leading-relaxed">
                     Restricts execution to the top morning and European crossover momentum setups. Completely halts over-trading and late-session chop drift.
                   </p>
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-surface-800 text-[11px] font-mono text-warning-light/80">
-                  Focus on High-Conviction Flow
+                  Default 3 (Configurable up to 8)
                 </div>
               </div>
 
@@ -973,13 +973,13 @@ const SystemGuide: React.FC = () => {
                     <span className="text-[10px] uppercase font-bold text-surface-400 tracking-wider">Dynamic Quality Gate</span>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-profit-light/10 text-profit-light border border-profit-light/20">Automated</span>
                   </div>
-                  <div className="text-lg font-bold font-mono text-white mb-1">Adaptive Universe</div>
+                  <div className="text-lg font-bold font-mono text-white mb-1">Top 35 Stocks</div>
                   <p className="text-xs text-surface-400 leading-relaxed">
-                    Scrapes the active liquid F&amp;O universe (~200 scrips) dynamically, verifying ₹40 Cr turnover, ₹150 price floor, and ATR ≥ 1.5%.
+                    Dynamically re-screens 180+ liquid F&amp;O stocks every 30 mins between 09:30–14:30 IST, verifying ₹40 Cr turnover, ₹150 price floor, and ATR ≥ 1.5%.
                   </p>
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-surface-800 text-[11px] font-mono text-profit-light/80">
-                  Dynamic Regime Selection
+                  Dynamic 30m Watchlist
                 </div>
               </div>
             </div>
@@ -1002,7 +1002,7 @@ const SystemGuide: React.FC = () => {
                   Daily Period: N = 20
                 </span>
                 <span className="text-xs font-mono px-3 py-1 rounded-full bg-profit-light/10 text-profit-light border border-profit-light/20">
-                  Threshold: KER ≥ 0.28
+                  Threshold: KER ≥ 0.35
                 </span>
               </div>
             </div>
@@ -1034,7 +1034,7 @@ const SystemGuide: React.FC = () => {
                   KER = Direction / Volatility (0.0 to 1.0)
                 </div>
                 <p className="text-xs text-surface-400 leading-relaxed">
-                  A pure straight line yields 1.0. A sideways random walk approaches 0.0. Candidates with KER ≥ 0.28 qualify for intraday trading.
+                  A pure straight line yields 1.0. A sideways random walk approaches 0.0. Candidates with KER ≥ 0.35 qualify for directional trend trading.
                 </p>
               </div>
             </div>
@@ -1042,7 +1042,7 @@ const SystemGuide: React.FC = () => {
         </div>
       )}
 
-      {/* ─── TAB 3: 25 STRATEGIES CATALOG ───────────────────────────────── */}
+      {/* ─── TAB 3: 26 STRATEGIES CATALOG ───────────────────────────────── */}
       {activeTab === 'strategies' && (
         <div className="space-y-6 animate-fade-in">
           {/* Active Roster Pruning Notice */}
@@ -1050,7 +1050,7 @@ const SystemGuide: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-accent-light font-bold text-xs uppercase tracking-wider">
                 <Filter size={16} />
-                Quantitative Strategy Pruning Policy (Walk-Forward Verified)
+                Quantitative Strategy Pruning Policy (Walk-Forward Verified across 26 Strategies)
               </div>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-accent-light/15 text-accent-light border border-accent-light/30">
                 Shared by Auto &amp; Paper Agent
@@ -1176,15 +1176,15 @@ const SystemGuide: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
             <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Discipline</span>
-            <span className="text-base font-bold text-warning-light font-mono">Max 8-10 / Day</span>
+            <span className="text-base font-bold text-warning-light font-mono">Max 3 / Day</span>
           </div>
           <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
             <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Confluence</span>
-            <span className="text-base font-bold text-white font-mono">≥ 3 Families</span>
+            <span className="text-base font-bold text-white font-mono">Adaptive (≥2/≥3)</span>
           </div>
           <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
             <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Market Regime</span>
-            <span className="text-base font-bold text-accent-light font-mono">ADX ≥ 20</span>
+            <span className="text-base font-bold text-accent-light font-mono">ADX ≥ 20 | KER ≥ 0.35</span>
           </div>
           <div className="px-3.5 py-2.5 rounded-xl bg-surface-900/90 border border-surface-700/60 text-center">
             <span className="text-[10px] uppercase font-semibold text-surface-400 block tracking-wider">Risk Geometry</span>
@@ -1197,7 +1197,7 @@ const SystemGuide: React.FC = () => {
           {[
             { id: 'architecture', label: 'Architecture & Schedule', icon: <Cpu size={15} /> },
             { id: 'quant_edge', label: 'Quant Edge & Screener', icon: <TrendingUp size={15} /> },
-            { id: 'strategies', label: '25 TA Strategies', count: '25', icon: <Compass size={15} /> },
+            { id: 'strategies', label: '26 TA Strategies', count: '26', icon: <Compass size={15} /> },
             { id: 'confluence', label: 'Confluence, Regime & 1:2 R:R', icon: <Layers size={15} /> },
             { id: 'friction_guard', label: 'Statutory Friction Guard', icon: <Calculator size={15} /> },
             { id: 'partial_booking', label: 'Partial Profit Booking', icon: <Split size={15} /> },
@@ -1249,7 +1249,7 @@ const SystemGuide: React.FC = () => {
             </div>
 
             <p className="text-sm text-surface-300 leading-relaxed">
-              A single technical indicator firing is statistically insufficient to overcome exchange friction and slippage. The platform groups all 25 strategies into eight independent indicator families. In <strong>CHOPPY_RANGE</strong> or unknown regime, an order is approved <strong>only when ≥ 3 distinct families agree</strong> on the same direction. In a confirmed <strong>TRENDING_BULL or TRENDING_BEAR</strong> regime (ADX ≥ 20, KER ≥ 0.35), the threshold relaxes to <strong>≥ 2 families</strong> — allowing clean breakout + volume confirmations to fire without requiring a third oscillator vote. All trades must align with the 50-period EMA macro trend and pass the Market Regime Filter.
+              A single technical indicator firing is statistically insufficient to overcome exchange friction and slippage. The platform groups all 26 strategies into eight independent indicator families. In <strong>CHOPPY_RANGE</strong> or unknown regime, an order is approved <strong>only when ≥ 3 distinct families agree</strong> on the same direction. In a confirmed <strong>TRENDING_BULL or TRENDING_BEAR</strong> regime (ADX ≥ 20, KER ≥ 0.35), the threshold relaxes to <strong>≥ 2 families</strong> — allowing clean breakout + volume confirmations to fire without requiring a third oscillator vote. All trades must align with the 50-period EMA macro trend and pass the Market Regime Filter.
             </p>
 
             {/* Market Regime Engine Card */}
@@ -1265,27 +1265,61 @@ const SystemGuide: React.FC = () => {
               </div>
 
               <p className="text-xs text-surface-300 leading-relaxed">
-                In our 1-year walk-forward backtest, the system was profitable in <strong>8 out of 13 months</strong> and gained +₹10,164 between Dec and Apr. The drawdowns occurred specifically during two sideways consolidation periods (Nov 2025 and July 2026), where market-wide ranges chopped up breakout strategies. The <strong>Market Regime Filter</strong> classifies market structure into three distinct states:
+                In our walk-forward backtest, drawdowns occurred specifically during sideways consolidation periods where market-wide ranges chopped up breakout strategies. The <strong>Market Regime Filter</strong> classifies market structure into distinct quantitative states:
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                 <div className="p-3.5 rounded-xl bg-profit-dark/10 border border-profit/30 space-y-1.5">
                   <span className="font-bold text-profit-light block">1. TRENDING_BULL</span>
                   <p className="text-surface-300 leading-relaxed">
-                    ADX ≥ 20, +DI &gt; -DI, Close &gt; 50 EMA, and KER ≥ 0.25. High-conviction long breakouts and momentum continuation approved. Counter-trend shorts prohibited.
+                    ADX ≥ 20, +DI &gt; -DI, Close &gt; 50 EMA, and KER ≥ 0.35. High-conviction long breakouts and momentum continuation approved. Counter-trend shorts prohibited.
                   </p>
                 </div>
                 <div className="p-3.5 rounded-xl bg-loss-dark/10 border border-loss/30 space-y-1.5">
                   <span className="font-bold text-loss-light block">2. TRENDING_BEAR</span>
                   <p className="text-surface-300 leading-relaxed">
-                    ADX ≥ 20, -DI &gt; +DI, Close &lt; 50 EMA, and KER ≥ 0.25. Short breakdowns approved. Counter-trend longs prohibited.
+                    ADX ≥ 20, -DI &gt; +DI, Close &lt; 50 EMA, and KER ≥ 0.35. Short breakdowns approved. Counter-trend longs prohibited.
                   </p>
                 </div>
                 <div className="p-3.5 rounded-xl bg-warning-dark/10 border border-warning/30 space-y-1.5">
                   <span className="font-bold text-warning-light block">3. CHOPPY_RANGE (Squeeze)</span>
                   <p className="text-surface-300 leading-relaxed">
-                    ADX &lt; 20, KER &lt; 0.25, or Bollinger Band Width squeezed. <strong>Breakout strategies (Donchian, Bollinger) are automatically suppressed</strong> to eliminate fee drain.
+                    ADX &lt; 20, KER &lt; 0.35, or Bollinger Band Width squeezed. <strong>Breakout strategies (Donchian, Bollinger) are automatically suppressed</strong> to eliminate fee drain.
                   </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Dynamic Microstructural Quality Gate Card */}
+            <div className="bg-surface-900/90 border border-emerald-500/30 rounded-xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Zap className="text-emerald-400" size={16} />
+                  Dynamic Microstructural Quality Gate (Per-Candle Defense)
+                </h3>
+                <span className="text-[10px] font-mono px-2.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
+                  Zero False-Breakout Traps
+                </span>
+              </div>
+              <p className="text-xs text-surface-300 leading-relaxed">
+                Rather than using brittle static blacklists, every candidate trigger candle must clear 4 microstructural filters before execution:
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs font-mono">
+                <div className="p-2.5 rounded-lg bg-surface-950 border border-surface-800">
+                  <span className="text-surface-400 text-[10px] block">1. Trigger RVOL</span>
+                  <span className="text-white font-bold">≥ 1.2× Volume Surge</span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-surface-950 border border-surface-800">
+                  <span className="text-surface-400 text-[10px] block">2. Rejection Wick</span>
+                  <span className="text-profit-light font-bold">≤ 25% Candle Range</span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-surface-950 border border-surface-800">
+                  <span className="text-surface-400 text-[10px] block">3. Local 15m KER</span>
+                  <span className="text-accent-light font-bold">≥ 0.30 Efficiency</span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-surface-950 border border-surface-800">
+                  <span className="text-surface-400 text-[10px] block">4. Midday Lull (11:30–13:15)</span>
+                  <span className="text-warning-light font-bold">≥ 2.2× Volume Surge</span>
                 </div>
               </div>
             </div>
@@ -1294,7 +1328,7 @@ const SystemGuide: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               {[
                 { name: 'Trend Family (4)', examples: 'EMA Crossover, Supertrend, PSAR, ADX', role: 'Confirms prevailing macro direction & prevents counter-trend traps' },
-                { name: 'Structure Family (4)', examples: 'Absorption, FVG, Delta, CPR', role: 'Validates key institutional support/resistance levels & order blocks' },
+                { name: 'Structure Family (5)', examples: 'Absorption, FVG, Delta, CPR, FRVP (POC)', role: 'Validates key institutional support/resistance levels & order blocks' },
                 { name: 'Breakout Family (3)', examples: 'Keltner, Bollinger Squeeze, Donchian', role: 'Validates explosive volatility expansion out of tight consolidation' },
                 { name: 'Momentum Family (3)', examples: 'MACD Zero-Cross, RSI, TSI', role: 'Confirms directional acceleration & candle expansion velocity' },
                 { name: 'Oscillator Family (6)', examples: 'Stochastic, StochRSI, CCI, Williams, AO, MFI', role: 'Pinpoints statistical exhaustion (counts as 1 collective family vote)' },
@@ -1322,28 +1356,28 @@ const SystemGuide: React.FC = () => {
                 <div className="p-4 rounded-xl bg-surface-800/80 border border-surface-700/80 space-y-2">
                   <h4 className="font-bold text-white flex items-center gap-2">
                     <ShieldCheck size={16} className="text-profit-light" />
-                    Phase 1: 0 to +1.0R (Breathing Room)
+                    Phase 1: 0 to +1.2R (Breathing Room)
                   </h4>
                   <p className="text-surface-400 leading-relaxed">
-                    Initial protective stop is placed at -1.0R (minimum 1.0% safety noise floor). The trailing stop stays disarmed during initial oscillations to avoid stopping out prematurely.
+                    Initial protective stop is placed at -1.0R (minimum 1.2% safety noise floor). The trailing stop stays disarmed during initial oscillations to avoid stopping out prematurely.
                   </p>
                 </div>
                 <div className="p-4 rounded-xl bg-surface-800/80 border border-surface-700/80 space-y-2">
                   <h4 className="font-bold text-white flex items-center gap-2">
                     <Target size={16} className="text-accent-light" />
-                    Phase 2: +1.0R Reached (Breakeven Lock)
+                    Phase 2: +1.2R Reached (Profit Cushion Armed)
                   </h4>
                   <p className="text-surface-400 leading-relaxed">
-                    Once price advances past +1.0R profit cushion, the trailing stop immediately arms and ratchets to <strong>Breakeven (Entry Price)</strong>. Downside loss risk is completely eliminated!
+                    Once price advances past +1.2R profit cushion (trailingSlProfitCushionR = 1.2), the trailing stop immediately arms and ratchets to at least <strong>Breakeven (Entry Price)</strong>. Downside loss risk is completely eliminated!
                   </p>
                 </div>
                 <div className="p-4 rounded-xl bg-surface-800/80 border border-surface-700/80 space-y-2">
                   <h4 className="font-bold text-white flex items-center gap-2">
                     <TrendingUp size={16} className="text-profit-light" />
-                    Phase 3: +1.0R to +2.0R (Profit Ratchet)
+                    Phase 3: +1.2R to +2.0R (Profit Ratchet)
                   </h4>
                   <p className="text-surface-400 leading-relaxed">
-                    Stop loss trails 2.0 × ATR behind price. If market pulls back, it secures locked profit. If momentum continues, it captures the full 1:2.0 target (+₹1,000 against ₹500 risk).
+                    Stop loss trails 1.4 × ATR (trailingSlAtrMultiplier = 1.4) behind high/low water mark. If market pulls back, it secures locked profit. If momentum continues, it captures the full 1:2.0 target (+₹1,400 against ₹700 risk).
                   </p>
                 </div>
               </div>
@@ -1571,7 +1605,7 @@ const SystemGuide: React.FC = () => {
                 </p>
               </div>
               <span className="text-xs font-mono px-3 py-1 rounded-full bg-profit-light/10 text-profit-light border border-profit-light/30">
-                50% Milestone Exit
+                50% Milestone Exit @ +1.2R
               </span>
             </div>
 
@@ -1581,9 +1615,9 @@ const SystemGuide: React.FC = () => {
                   <span className="w-8 h-8 rounded-xl bg-accent-light/15 text-accent-light flex items-center justify-center font-bold font-mono text-xs mb-3 border border-accent-light/30">
                     01
                   </span>
-                  <h3 className="font-bold text-white text-sm mb-1.5">Dual-Target Entry</h3>
+                  <h3 className="font-bold text-white text-sm mb-1.5">Dual-Target Geometry</h3>
                   <p className="text-xs text-surface-400 leading-relaxed">
-                    The position opens with 100% quantity. Target 1 is placed at 1:2 R:R (e.g. +2.0%), while Target 2 is set at the full setup target (e.g. +4.0%).
+                    Position opens with 100% quantity. Target 1 is front-loaded at <strong>+1.2R</strong> (partialBookingTargetRR = 1.2) to bank gains before mean-reversion, while Target 2 is set at full setup runner target (1:2.0R to 1:4.0R).
                   </p>
                 </div>
               </div>
@@ -1595,7 +1629,7 @@ const SystemGuide: React.FC = () => {
                   </span>
                   <h3 className="font-bold text-white text-sm mb-1.5">Target 1: Lock 50% Profit</h3>
                   <p className="text-xs text-surface-400 leading-relaxed">
-                    When price reaches Target 1, exactly 50% of the position is exited immediately at market price, crediting realized profit into cash balance.
+                    When price reaches Target 1 (+1.2R), exactly 50% of the position is exited immediately via Limit order near LTP, locking realized profit and releasing 50% used margin.
                   </p>
                 </div>
               </div>
@@ -1605,22 +1639,22 @@ const SystemGuide: React.FC = () => {
                   <span className="w-8 h-8 rounded-xl bg-surface-800 text-white flex items-center justify-center font-bold font-mono text-xs mb-3 border border-surface-700">
                     03
                   </span>
-                  <h3 className="font-bold text-white text-sm mb-1.5">Stop-Loss Ratchets to Breakeven</h3>
+                  <h3 className="font-bold text-white text-sm mb-1.5">Atomic SL Ratchet to Breakeven + Friction</h3>
                   <p className="text-xs text-surface-400 leading-relaxed">
-                    The Stop Loss for the remaining 50% is instantly adjusted to the <strong>Entry Price</strong>. The remainder is now a completely risk-free runner targeting Target 2.
+                    The native exchange STOPLOSS_LIMIT order on Angel One is atomically modified to <strong>Breakeven + Round-Trip Statutory Friction</strong> (+0.05% buffer in paper trade). Runner is completely risk-free!
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* ₹250 Minimum Profit Threshold Alert */}
-            <div className="bg-gradient-to-r from-surface-900 via-surface-900 to-surface-800 border border-surface-700/80 rounded-xl p-5">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-2">
+            {/* Default Disabled Note & ₹250 Minimum Profit Threshold Alert */}
+            <div className="bg-gradient-to-r from-surface-900 via-surface-900 to-surface-800 border border-surface-700/80 rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <ShieldCheck className="text-profit-light" size={18} />
-                Smart Brokerage Safeguard (₹250 Minimum Profit Threshold)
+                Smart Brokerage Safeguard &amp; Default Setting
               </h3>
               <p className="text-xs text-surface-300 leading-relaxed">
-                Angel One charges flat ₹20 per order. Splitting an exit into two transactions incurs an extra order fee (≈₹23.60 with GST). To ensure this cost never erodes returns, the engine enforces a <strong>₹250 Minimum Profit Threshold</strong>: if 50% exit profit would yield under ₹250, partial booking is automatically bypassed in favor of a single full exit at target.
+                Angel One charges flat ₹20 per order. Splitting an exit into two transactions incurs an extra order fee (≈₹23.60 with GST). To prevent fee erosion, <strong>Partial Profit Booking is disabled by default</strong> so full positions trail smoothly at 1.4× ATR. When enabled, the engine enforces a <strong>₹250 Minimum Profit Threshold</strong>: if 50% exit profit would yield under ₹250, partial booking is automatically bypassed in favor of a single full exit at target.
               </p>
             </div>
           </div>
@@ -2039,8 +2073,8 @@ const SystemGuide: React.FC = () => {
                     },
                     {
                       dim: 'Confluence Gate & Multi-Family Voting',
-                      paper: 'Identical: Requires ≥ 3 distinct families + Market Regime filter (ADX ≥ 20, KER ≥ 0.25) + 50 EMA trend filter',
-                      live: 'Identical: Requires ≥ 3 distinct families + Market Regime filter (ADX ≥ 20, KER ≥ 0.25) + 50 EMA trend filter (Confidence ≥ 85% in Auto mode)'
+                      paper: 'Adaptive: Requires ≥ 3 families in CHOPPY_RANGE or ≥ 2 families in TRENDING_BULL/BEAR (KER ≥ 0.35, ADX ≥ 20) + 50 EMA trend filter',
+                      live: 'Adaptive: Requires ≥ 3 families in CHOPPY_RANGE or ≥ 2 families in TRENDING_BULL/BEAR (KER ≥ 0.35, ADX ≥ 20) + 50 EMA trend filter (Confidence ≥ 85% in Auto mode)'
                     },
                     {
                       dim: 'Stop Loss Protection',
@@ -2049,13 +2083,13 @@ const SystemGuide: React.FC = () => {
                     },
                     {
                       dim: 'Pending Order Management',
-                      paper: 'Immediate virtual execution at incoming tick price',
-                      live: '20-Second Timeout Queue: Unfilled limit orders are auto-cancelled after 20s to prevent stale fills'
+                      paper: 'Immediate virtual execution at incoming tick price (supports Direct Breakout & Pullback Retest)',
+                      live: '15-Second Timeout Queue: Unfilled limit orders are auto-cancelled after 15s to prevent stale fills'
                     },
                     {
                       dim: 'Dynamic Trailing & Partial Booking',
-                      paper: 'Supported: Books 50% at Target 1, ratchets virtual SL to Breakeven @ Entry',
-                      live: 'Supported: Books 50% at Target 1, modifies exchange-side SL order to Breakeven via SmartAPI'
+                      paper: 'Supported: Books 50% at Target 1 (+1.2R), ratchets virtual SL to Breakeven (+0.05% cushion)',
+                      live: 'Supported: Books 50% at Target 1 (+1.2R), atomically modifies exchange SL order to Breakeven + Friction via SmartAPI'
                     },
                     {
                       dim: 'State Persistence & Recovery',
