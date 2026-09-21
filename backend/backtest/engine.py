@@ -38,18 +38,18 @@ from ..strategies.awesome_oscillator import AwesomeOscillatorStrategy
 from ..strategies.bollinger_breakout import BollingerBreakoutStrategy
 from ..strategies.cci_reversal import CCIReversalStrategy
 from ..strategies.cmf_accumulation import CMFAccumulationStrategy
+from ..strategies.cpr_breakout_reversal import CPRBreakoutReversalStrategy
 from ..strategies.donchian_breakout import DonchianBreakoutStrategy
 from ..strategies.ema_crossover import EMACrossoverStrategy
-from ..strategies.institutional_absorption import InstitutionalAbsorptionStrategy
-from ..strategies.keltner_breakout import KeltnerBreakoutStrategy
-from ..strategies.macd_cross import MACDCrossStrategy
-from ..strategies.mfi_exhaustion import MFIExhaustionStrategy
-from ..strategies.cpr_breakout_reversal import CPRBreakoutReversalStrategy
 from ..strategies.fixed_range_volume_profile import (
     FixedRangeVolumeProfileStrategy,
 )
 from ..strategies.gap_fill import GapFillStrategy
+from ..strategies.institutional_absorption import InstitutionalAbsorptionStrategy
+from ..strategies.keltner_breakout import KeltnerBreakoutStrategy
 from ..strategies.liquidity_grab_reversal import LiquidityGrabReversalStrategy
+from ..strategies.macd_cross import MACDCrossStrategy
+from ..strategies.mfi_exhaustion import MFIExhaustionStrategy
 from ..strategies.opening_range_breakout import OpeningRangeBreakoutStrategy
 from ..strategies.order_block_fvg import OrderBlockFVGStrategy
 from ..strategies.psar_trend import PSARTrendStrategy
@@ -111,7 +111,9 @@ def compute_statutory_friction(
     brokerage = round(buy_brokerage + sell_brokerage, 2)
 
     stt = round(sell_turnover * 0.00025, 2)  # 0.025% on sell
-    exchange_fee = round(total_turnover * 0.0000297, 2)  # 0.00297% (SEBI True-to-Label NSE Cash Intraday)
+    exchange_fee = round(
+        total_turnover * 0.0000297, 2
+    )  # 0.00297% (SEBI True-to-Label NSE Cash Intraday)
     sebi_charge = round(total_turnover * 0.000001, 2)  # ₹10 / crore
     stamp_duty = round(buy_turnover * 0.00003, 2)  # 0.003% on buy
     gst = round((brokerage + exchange_fee + sebi_charge) * 0.18, 2)
@@ -136,11 +138,15 @@ class BacktestTrade:
     partial_exit_price: float = 0.0
     partial_pnl_rs: float = 0.0
     exit_price: float = 0.0
-    exit_reason: str = "EOD"  # 'TARGET', 'SL', 'BREAKEVEN_SL', 'TRAILING_SL', 'SQUAREOFF', 'EOD'
+    exit_reason: str = (
+        "EOD"  # 'TARGET', 'SL', 'BREAKEVEN_SL', 'TRAILING_SL', 'SQUAREOFF', 'EOD'
+    )
     bars_held: int = 0
     pnl_pct: float = 0.0  # % return on position
     pnl_rs: float = 0.0  # Gross ₹ P&L
-    friction_rs: float = 0.0  # Indian statutory friction (brokerage, STT, turnover, GST)
+    friction_rs: float = (
+        0.0  # Indian statutory friction (brokerage, STT, turnover, GST)
+    )
     net_pnl_rs: float = 0.0  # Realized net ₹ P&L after friction
     entry_time: str = ""  # ISO timestamp of entry
     rr_achieved: float = 0.0  # actual R:R achieved
@@ -497,9 +503,13 @@ class BacktestEngine:
 
             if signal_entry > 0:
                 if direction == "BUY":
-                    entry_price = signal_entry if next_low <= signal_entry else next_open
+                    entry_price = (
+                        signal_entry if next_low <= signal_entry else next_open
+                    )
                 else:
-                    entry_price = signal_entry if next_high >= signal_entry else next_open
+                    entry_price = (
+                        signal_entry if next_high >= signal_entry else next_open
+                    )
             else:
                 entry_price = next_open
 
@@ -582,11 +592,7 @@ class BacktestEngine:
                     atr = compute_atr(df.iloc[:j]) or atr
 
                 # ── Check Target 1 (+1.2R) for Partial Booking ───────
-                if (
-                    self.partial_booking_enabled
-                    and not partial_booked
-                    and leg1_qty > 0
-                ):
+                if self.partial_booking_enabled and not partial_booked and leg1_qty > 0:
                     if direction == "BUY" and hi >= target1:
                         partial_booked = True
                         partial_exit_price = target1
@@ -597,7 +603,9 @@ class BacktestEngine:
                         if entry_adx >= 25.0:
                             trade_sl = max(trade_sl, entry_price)
                         else:
-                            trade_sl = max(trade_sl, round(entry_price - 0.4 * trade_risk, 2))
+                            trade_sl = max(
+                                trade_sl, round(entry_price - 0.4 * trade_risk, 2)
+                            )
                     elif direction == "SELL" and lo <= target1:
                         partial_booked = True
                         partial_exit_price = target1
@@ -605,7 +613,9 @@ class BacktestEngine:
                         if entry_adx >= 25.0:
                             trade_sl = min(trade_sl, entry_price)
                         else:
-                            trade_sl = min(trade_sl, round(entry_price + 0.4 * trade_risk, 2))
+                            trade_sl = min(
+                                trade_sl, round(entry_price + 0.4 * trade_risk, 2)
+                            )
 
                 # ── Check Exit Conditions for Remaining Runner ────────
                 if direction == "BUY":

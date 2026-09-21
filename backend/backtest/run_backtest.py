@@ -18,8 +18,8 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from typing import List, Optional
 from pathlib import Path
+from typing import List, Optional
 
 # Ensure workspace root is on sys.path
 _ROOT = Path(__file__).resolve().parents[2]
@@ -170,6 +170,23 @@ def screen_top_momentum_fno(
 
 
 def main():
+    try:
+        from ..config import ConfigManager
+
+        _cfg = ConfigManager().get_risk_config()
+    except Exception:
+        _cfg = {}
+
+    default_capital = float(_cfg.get("maxCapitalPerTrade", 8000) * 5)
+    default_confluence = int(_cfg.get("minConfluenceScore", 2))
+    default_confluence_trending = int(_cfg.get("minConfluenceScoreTrending", 2))
+    default_min_rr = float(_cfg.get("minRiskReward", 1.8))
+    default_trailing_atr = float(_cfg.get("trailingSlAtrMultiplier", 2.2))
+    default_trail_after_r = float(_cfg.get("trailingSlProfitCushionR", 1.5))
+    default_min_sl_pct = float(_cfg.get("minStopLossPercent", 1.0))
+    default_max_sl_pct = float(_cfg.get("maxStopLossPercent", 2.4))
+    default_max_daily_trades = int(_cfg.get("maxDailyTrades", 8))
+
     parser = argparse.ArgumentParser(description="Agentic Trading Backtest Runner")
     parser.add_argument(
         "--interval",
@@ -208,57 +225,57 @@ def main():
     parser.add_argument(
         "--capital",
         type=float,
-        default=20000.0,
-        help="Capital allocated per trade in INR (default: 20000.0)",
+        default=default_capital,
+        help=f"Capital allocated per trade in INR (default: {default_capital})",
     )
 
     parser.add_argument(
         "--confluence",
         type=int,
-        default=3,
-        help="Minimum confluence score (default: 3)",
+        default=default_confluence,
+        help=f"Minimum confluence score (default: {default_confluence})",
     )
     parser.add_argument(
         "--confluence-trending",
         type=int,
-        default=2,
-        help="Minimum confluence score in trending regime (default: 2)",
+        default=default_confluence_trending,
+        help=f"Minimum confluence score in trending regime (default: {default_confluence_trending})",
     )
     parser.add_argument(
         "--min-rr",
         type=float,
-        default=2.0,
-        help="Minimum R:R ratio gate (default: 2.0)",
+        default=default_min_rr,
+        help=f"Minimum R:R ratio gate (default: {default_min_rr})",
     )
     parser.add_argument(
         "--trailing-atr",
         type=float,
-        default=1.4,
-        help="Trailing stop loss multiplier (default: 1.4 × ATR)",
+        default=default_trailing_atr,
+        help=f"Trailing stop loss multiplier (default: {default_trailing_atr} × ATR)",
     )
     parser.add_argument(
         "--trail-after-r",
         type=float,
-        default=1.2,
-        help="Activate trailing SL only after reaching N × R profit (default: 1.2)",
+        default=default_trail_after_r,
+        help=f"Activate trailing SL only after reaching N × R profit (default: {default_trail_after_r})",
     )
     parser.add_argument(
         "--min-sl-pct",
         type=float,
-        default=1.2,
-        help="Minimum stop-loss width percent (default: 1.2%%)",
+        default=default_min_sl_pct,
+        help=f"Minimum stop-loss width percent (default: {default_min_sl_pct}%%)",
     )
     parser.add_argument(
         "--max-sl-pct",
         type=float,
-        default=2.4,
-        help="Maximum stop-loss width percent cap (default: 2.4%%)",
+        default=default_max_sl_pct,
+        help=f"Maximum stop-loss width percent cap (default: {default_max_sl_pct}%%)",
     )
     parser.add_argument(
         "--max-daily-trades",
         type=int,
-        default=4,
-        help="Maximum trades executed per day across portfolio (default: 4)",
+        default=default_max_daily_trades,
+        help=f"Maximum trades executed per day across portfolio (default: {default_max_daily_trades})",
     )
     parser.add_argument(
         "--no-trend-filter",

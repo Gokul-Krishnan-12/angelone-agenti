@@ -459,22 +459,26 @@ Located in [backend/backtest/](file:///home/gokul/Desktop/angelone-agenti/backen
 
 ### 11.1 Execution Command
 ```bash
+# Single period walk-forward backtest (automatically inherits active ConfigManager settings):
 uv run python -m backend.backtest.run_backtest \
     --period 60d \
-    --interval 15m \
+    --interval 5m \
     --capital 40000 \
-    --universe fno \
-    --top-momentum 15 \
+    --symbols RELIANCE BAJAJFINSV VOLTAS NATIONALUM SHRIRAMFIN BDL MAZDOCK \
     --output backtest_report.md
+
+# Comprehensive multi-period backtest (30d 5m, 60d 5m, 1y 1h, 1y 1d):
+uv run python backend/backtest/run_multi_period.py
 ```
 
 ### 11.2 Key CLI Parameters
 - `--period`: Simulation window (`30d`, `60d`, `6mo`, `1y`).
-- `--interval`: Bar size (`5m`, `15m`, `1h`, `1d`).
-- `--capital`: Trade allocation in INR (default: `40000.0`).
+- `--interval`: Bar size (`5m`, `15m`, `1h`, `1d`). *(Note: Yahoo Finance caps 5m intraday bars to max 60 calendar days).*
+- `--capital`: Trade allocation in INR (default: `40000.0`, reflecting ₹8k margin × 5x MIS leverage).
 - `--confluence`: Minimum strategy family agreement gate (default: `2`).
 - `--min-rr`: Minimum target risk-reward ratio (default: `1.8`).
-- `--trailing-atr`: ATR trailing stop-loss multiplier (default: `2.0` after `+1.0R` cushion).
+- `--trailing-atr`: ATR trailing stop-loss multiplier (default: `2.2` after `+1.5R` cushion).
+- `--partial-booking`: Front-loaded profit booking at `+1.2R` with breakeven + statutory friction ratchet.
 - `--blacklist`: Space-delimited symbols to exclude.
 
 ---
