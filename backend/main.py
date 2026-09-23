@@ -316,6 +316,13 @@ def handle_request(req):
 
         elif method == "save_settings":
             config_manager.config.update(params)
+            # Synchronize candleInterval between top-level and risk config
+            if "candleInterval" in params or ("risk" in params and isinstance(params.get("risk"), dict) and "candleInterval" in params["risk"]):
+                raw_ci = str(params.get("candleInterval") or (params.get("risk", {}).get("candleInterval", "5minute")))
+                ci = "15minute" if "15" in raw_ci else "5minute"
+                config_manager.config["candleInterval"] = ci
+                if "risk" in config_manager.config and isinstance(config_manager.config["risk"], dict):
+                    config_manager.config["risk"]["candleInterval"] = ci
             config_manager.save()
             telegram_bot.restart()
             return success({"status": "saved"})

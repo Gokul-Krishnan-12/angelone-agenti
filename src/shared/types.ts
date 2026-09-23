@@ -230,6 +230,8 @@ export interface Signal {
   timestamp: string;
   indicators: Record<string, number>;
   isPullbackEntry?: boolean;
+  timeframe?: string;
+  candleInterval?: string;
 }
 
 export interface AgentState {
@@ -248,6 +250,7 @@ export interface AgentState {
 // ─── Risk Management ──────────────────────────────────────────────
 
 export interface RiskConfig {
+  candleInterval?: '5minute' | '15minute' | string;
   maxCapitalPerTrade: number;
   riskPerTrade?: number;
   riskPercent?: number;

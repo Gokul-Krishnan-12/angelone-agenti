@@ -36,10 +36,12 @@ const PaperTrade: React.FC = () => {
   const maxDailyTrades = usePaperTradingStore((s) => s.maxDailyTrades) || 8;
   const riskPerTrade = usePaperTradingStore((s) => s.riskPerTrade) || 500;
   const rejectedTrades = usePaperTradingStore((s) => s.rejectedTrades) || [];
-  const pullbackEntryEnabled = usePaperTradingStore((s) => s.pullbackEntryEnabled);
+  const rawInterval = String(usePaperTradingStore((s) => s.candleInterval) || '5minute');
+  const candleInterval = rawInterval.includes('15') ? '15minute' : '5minute';
   const setMaxDailyTrades = usePaperTradingStore((s) => s.setMaxDailyTrades);
   const setRiskPerTrade = usePaperTradingStore((s) => s.setRiskPerTrade);
   const setPullbackEntryEnabled = usePaperTradingStore((s) => s.setPullbackEntryEnabled);
+  const setCandleInterval = usePaperTradingStore((s) => s.setCandleInterval);
   const setIsRunning = usePaperTradingStore((s) => s.setIsRunning);
   const setDummyBalance = usePaperTradingStore((s) => s.setDummyBalance);
   const setMaxCapitalPerTrade = usePaperTradingStore((s) => s.setMaxCapitalPerTrade);
@@ -164,6 +166,36 @@ const PaperTrade: React.FC = () => {
           >
             {pullbackEntryEnabled ? <Target size={14} className="text-accent-light" /> : <Zap size={14} className="text-profit-light" />}
             <span>Entry: {pullbackEntryEnabled ? '🎯 Pullback Retest' : '⚡ Direct Breakout'}</span>
+          </button>
+
+          {/* Timeframe Toggle Button */}
+          <button
+            onClick={() => {
+              const next = candleInterval === '15minute' ? '5minute' : '15minute';
+              setCandleInterval(next);
+              const curSettings = useTradingStore.getState().settings;
+              if (curSettings) {
+                const updatedSettings = {
+                  ...curSettings,
+                  candleInterval: next,
+                  risk: { ...curSettings.risk, candleInterval: next }
+                };
+                useTradingStore.getState().setSettings(updatedSettings);
+              }
+              window.electronAPI?.invoke('settings:save', {
+                candleInterval: next,
+                risk: { ...useTradingStore.getState().settings?.risk, candleInterval: next }
+              });
+            }}
+            className={`flex items-center gap-1.5 px-3.5 py-2 border rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
+              candleInterval === '15minute'
+                ? 'bg-profit-dark/20 hover:bg-profit-dark/30 text-profit-light border-profit/40'
+                : 'bg-surface-800 hover:bg-surface-750 text-accent-light border-accent/30'
+            }`}
+            title="Toggle between 5-Minute and 15-Minute Candle Execution Timeframe"
+          >
+            <Clock size={14} className={candleInterval === '15minute' ? 'text-profit-light' : 'text-accent-light'} />
+            <span>Timeframe: {candleInterval === '15minute' ? '⏱️ 15 Min' : '⚡ 5 Min'}</span>
           </button>
 
           <button

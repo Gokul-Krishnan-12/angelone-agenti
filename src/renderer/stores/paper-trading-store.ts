@@ -85,11 +85,13 @@ interface PaperTradingState {
   maxDailyTrades: number;
   riskPerTrade: number;
   pullbackEntryEnabled: boolean;
+  candleInterval: '5minute' | '15minute';
   lastPaperSummaryDate: string | null;
 
   setDummyBalance: (amount: number) => void;
   setIsRunning: (running: boolean) => void;
   setPullbackEntryEnabled: (enabled: boolean) => void;
+  setCandleInterval: (interval: '5minute' | '15minute') => void;
   setMaxCapitalPerTrade: (amount: number) => void;
   setMaxDailyTrades: (amount: number) => void;
   setRiskPerTrade: (amount: number) => void;
@@ -138,6 +140,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       rejectedTrades: [],
       lastPaperSummaryDate: null,
       pullbackEntryEnabled: false,
+      candleInterval: '5minute',
       activityLog: [
         {
           id: 'init-1',
@@ -149,6 +152,17 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       maxCapitalPerTrade: 8000,
       maxDailyTrades: 4,
       riskPerTrade: 700,
+
+      setCandleInterval: (interval: '5minute' | '15minute' | string) => {
+        const normalized: '5minute' | '15minute' = String(interval).includes('15') ? '15minute' : '5minute';
+        set({ candleInterval: normalized });
+        get().addLog(
+          'INFO',
+          normalized === '15minute'
+            ? '⏱️ Execution Timeframe: 15-Minute Candles Active (Institutional Edge, Lower Friction).'
+            : '⚡ Execution Timeframe: 5-Minute Candles Active (High-Frequency Momentum).'
+        );
+      },
 
       setPullbackEntryEnabled: (enabled: boolean) => {
         set({ pullbackEntryEnabled: enabled });

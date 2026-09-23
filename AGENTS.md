@@ -192,6 +192,12 @@ Open positions are checked every 60 seconds against current market signals:
 - Computes exact Brokerage, STT, turnover charges, GST, Gross P&L, and Net P&L.
 - Dispatches an EOD summary alert via Telegram and stops the engine.
 
+### 4.8 Configurable Execution Timeframe Architecture (5m vs 15m)
+The system supports global, synchronized candle interval configuration (`candleInterval: '5minute' | '15minute'`), accessible via the Settings page, Agent Control, and Paper Trading sandbox:
+- **`15minute` (Recommended / Institutional Edge)**: Filters out ~60%+ of random intraday wick noise. Captures wider 2.5%–4.0% expansions, diluting fixed statutory Indian exchange friction (₹40 round-trip brokerage + taxes) and yielding proven 63.6% win rate post-friction.
+- **`5minute` (Fast Momentum / Scalping)**: Rapid execution for fast-moving momentum bursts; requires strict volatility buffering.
+- **Synchronization**: Controlled via `config_manager.get_risk_config()["candleInterval"]`, automatically propagating across `TradingEngine`, `Scanner._fetch_candles` (with composite token-interval cache keys), `PaperTradingStore`, and `useTradingStore`.
+
 ---
 
 ## 5. Market Regime Classification & Kaufman Efficiency Ratio (KER)

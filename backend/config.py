@@ -14,7 +14,9 @@ class ConfigManager:
         self.config = {}
 
         self.default_config = {
+            "candleInterval": "5minute",  # default execution timeframe ("5minute" or "15minute")
             "risk": {
+                "candleInterval": "5minute",  # "5minute" or "15minute"
                 "maxCapitalPerTrade": 8000,
                 "riskPerTrade": 700.0,  # 1R risk budget per trade in INR (scaled with capital to dilute friction)
                 "riskPercent": 1.0,  # 1.0% of portfolio equity risk per trade
@@ -288,7 +290,10 @@ class ConfigManager:
 
     def get_risk_config(self):
         self.load()
-        return self.config.get("risk", self.default_config["risk"])
+        risk = self.config.get("risk", self.default_config["risk"])
+        raw_ci = str(risk.get("candleInterval") or self.config.get("candleInterval", "5minute"))
+        risk["candleInterval"] = "15minute" if "15" in raw_ci else "5minute"
+        return risk
 
     def get_strategy_config(self):
         self.load()

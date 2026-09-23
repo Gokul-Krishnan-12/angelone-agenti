@@ -92,6 +92,13 @@ export const useSmartAPI = () => {
             if (settings.risk.maxDailyTrades) {
               usePaperTradingStore.getState().setMaxDailyTrades(Number(settings.risk.maxDailyTrades));
             }
+            if (settings.risk.pullbackEntryEnabled !== undefined) {
+              usePaperTradingStore.getState().setPullbackEntryEnabled(Boolean(settings.risk.pullbackEntryEnabled));
+            }
+            const ci = settings.risk.candleInterval || settings.candleInterval;
+            if (ci === '5minute' || ci === '15minute') {
+              usePaperTradingStore.getState().setCandleInterval(ci);
+            }
           }
         }
         if (authStat === true) {

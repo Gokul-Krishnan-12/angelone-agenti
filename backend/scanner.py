@@ -232,22 +232,34 @@ class Scanner:
     ) -> Tuple[pd.DataFrame, bool]:
         now = datetime.datetime.now()
 
+        from .config import config_manager
+        risk_cfg = config_manager.get_risk_config()
+        interval = (
+            risk_cfg.get("candleInterval")
+            or config_manager.config.get("candleInterval", "5minute")
+        )
+        if interval not in ("5minute", "15minute"):
+            interval = "5minute"
+
+        cache_key = (instrument_token, interval)
         # Use cache if less than 1 minute old
         if (
-            instrument_token in self.candle_cache
+            cache_key in self.candle_cache
             and (
-                now - self.last_cache_time.get(instrument_token, datetime.datetime.min)
+                now - self.last_cache_time.get(cache_key, datetime.datetime.min)
             ).seconds
             < 60
         ):
-            return self.candle_cache[instrument_token], True
+            return self.candle_cache[cache_key], True
 
-        from_date = now - datetime.timedelta(days=5)
+        # Fetch 7 days for 15minute (~175 bars), 5 days for 5minute (~375 bars)
+        days = 7 if interval == "15minute" else 5
+        from_date = now - datetime.timedelta(days=days)
         to_date = now
 
         try:
             records = smart_api_client.get_historical_data(
-                instrument_token, from_date, to_date, "5minute", exchange="NSE"
+                instrument_token, from_date, to_date, interval, exchange="NSE"
             )
             if not records:
                 return pd.DataFrame(), False
@@ -259,11 +271,11 @@ class Scanner:
             if "volume" in df.columns:
                 df["volume"] = df["volume"].astype(float)
 
-            self.candle_cache[instrument_token] = df
-            self.last_cache_time[instrument_token] = now
+            self.candle_cache[cache_key] = df
+            self.last_cache_time[cache_key] = now
             return df, False
         except Exception as e:
-            logger.warning("Error fetching candles for %s: %s", tradingsymbol, e)
+            logger.warning("Error fetching %s candles for %s: %s", interval, tradingsymbol, e)
             return pd.DataFrame(), False
 
     # ──────────────────────────────────────────────────────────────────
@@ -549,6 +561,13 @@ class Scanner:
             best["rvol"] = micro_metrics.get("rvol", 1.0)
             best["wickRatio"] = micro_metrics.get("wick_ratio", 0.0)
             best["localKer"] = micro_metrics.get("local_ker", 0.5)
+
+        active_interval = (
+            risk_cfg.get("candleInterval")
+            or _cfg_mgr.config.get("candleInterval", "5minute")
+        )
+        best["candleInterval"] = active_interval
+        best["timeframe"] = "15m" if active_interval == "15minute" else "5m"
 
         best.pop("_strategy_id", None)
         return best

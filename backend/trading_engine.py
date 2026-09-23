@@ -70,7 +70,13 @@ class TradingEngine:
         self.thread.daemon = True
         self.thread.start()
         self._push_state_update()
-        self._push_log(f"Trading engine started in {mode} mode")
+        risk_cfg = config_manager.get_risk_config()
+        interval = (
+            risk_cfg.get("candleInterval")
+            or config_manager.config.get("candleInterval", "5minute")
+        )
+        tf_label = "15-Minute" if interval == "15minute" else "5-Minute"
+        self._push_log(f"Trading engine started in {mode} mode [{tf_label} Timeframe]")
 
     def stop(self):
         self.running = False
@@ -78,15 +84,32 @@ class TradingEngine:
         self._push_log("Trading engine stopped")
 
     def status(self) -> dict:
-        return {"running": self.running, "mode": self.mode}
+        risk_cfg = config_manager.get_risk_config()
+        interval = (
+            risk_cfg.get("candleInterval")
+            or config_manager.config.get("candleInterval", "5minute")
+        )
+        return {
+            "running": self.running,
+            "mode": self.mode,
+            "candleInterval": interval,
+            "timeframe": "15m" if interval == "15minute" else "5m",
+        }
 
     def _push_state_update(self):
+        risk_cfg = config_manager.get_risk_config()
+        interval = (
+            risk_cfg.get("candleInterval")
+            or config_manager.config.get("candleInterval", "5minute")
+        )
         event = {
             "event": "agent:state-update",
             "data": {
                 "running": self.running,
                 "mode": self.mode,
                 "status": "scanning" if self.running else "idle",
+                "candleInterval": interval,
+                "timeframe": "15m" if interval == "15minute" else "5m",
             },
         }
         print(json.dumps(event, cls=DateTimeEncoder))

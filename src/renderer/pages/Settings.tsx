@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTradingStore } from '../stores/trading-store';
 import { usePaperTradingStore } from '../stores/paper-trading-store';
 import { SETTINGS_SAVE, TELEGRAM_TEST } from '@shared/ipc-channels';
-import { Shield, ShieldCheck, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle, Send, Zap } from 'lucide-react';
+import { Shield, ShieldCheck, Key, HelpCircle, RotateCcw, Check, Sparkles, TrendingUp, AlertCircle, Send, Zap, Clock } from 'lucide-react';
 
 const Settings: React.FC = () => {
   const settings = useTradingStore((s) => s.settings);
@@ -48,13 +48,13 @@ const Settings: React.FC = () => {
       setTestTelegramStatus('Sending test message...');
       const res = window.electronAPI?.telegram?.test
         ? await window.electronAPI.telegram.test({
-            botToken: tg.botToken,
-            chatId: tg.chatId
-          })
+          botToken: tg.botToken,
+          chatId: tg.chatId
+        })
         : await window.electronAPI?.invoke(TELEGRAM_TEST, {
-            botToken: tg.botToken,
-            chatId: tg.chatId
-          });
+          botToken: tg.botToken,
+          chatId: tg.chatId
+        });
       if (res?.success) {
         setTestTelegramStatus('✅ Test message delivered to Telegram!');
       } else {
@@ -68,7 +68,37 @@ const Settings: React.FC = () => {
     }
   };
 
+  const rawInterval = String(localSettings?.risk?.candleInterval || localSettings?.candleInterval || '5minute');
+  const is15m = rawInterval.includes('15');
+
+  const handleTimeframeChange = (interval: '5minute' | '15minute') => {
+    setLocalSettings((prev: any) => ({
+      ...prev,
+      candleInterval: interval,
+      risk: {
+        ...prev?.risk,
+        candleInterval: interval
+      }
+    }));
+    usePaperTradingStore.getState().setCandleInterval(interval);
+    if (settings) {
+      setSettings({
+        ...settings,
+        candleInterval: interval,
+        risk: {
+          ...settings.risk,
+          candleInterval: interval
+        }
+      });
+    }
+  };
+
   const handleRiskChange = (key: string, value: any) => {
+    if (key === 'candleInterval') {
+      const normalized = String(value).includes('15') ? '15minute' : '5minute';
+      handleTimeframeChange(normalized);
+      return;
+    }
     setLocalSettings((prev: any) => {
       let finalValue = value;
       if (typeof value === 'string' && !value.includes(':')) {
@@ -117,14 +147,19 @@ const Settings: React.FC = () => {
           cleanedRisk[k] = parseFloat(cleanedRisk[k]) || 0;
         }
       });
+      const activeInterval = is15m ? '15minute' : '5minute';
+      cleanedRisk.candleInterval = activeInterval;
+
       const settingsToSave = {
         ...localSettings,
+        candleInterval: activeInterval,
         risk: cleanedRisk
       };
       setLocalSettings(settingsToSave);
       setSettings(settingsToSave);
 
       // Keep Paper Trading synchronized with Saved Settings
+      usePaperTradingStore.getState().setCandleInterval(activeInterval);
       if (cleanedRisk.riskPerTrade) {
         usePaperTradingStore.getState().setRiskPerTrade(Number(cleanedRisk.riskPerTrade));
       }
@@ -152,8 +187,10 @@ const Settings: React.FC = () => {
   const resetToDefaults = () => {
     setLocalSettings((prev: any) => ({
       ...prev,
+      candleInterval: '5minute',
       risk: {
         ...prev.risk,
+        candleInterval: '5minute',
         maxCapitalPerTrade: 8000,
         riskPerTrade: 700,
         maxDailyLoss: 2000,
@@ -212,7 +249,7 @@ const Settings: React.FC = () => {
             </div>
           )}
         </div>
-        
+
         <div className="space-y-6">
           {/* SmartAPI Credentials Section */}
           <section className="bg-surface-800/90 backdrop-blur-sm p-6 rounded-2xl border border-surface-700/80 shadow-lg">
@@ -277,11 +314,11 @@ const Settings: React.FC = () => {
                   <label className="block text-surface-300 text-xs font-semibold">Max Capital Per Trade (₹)</label>
                   <span className="text-[11px] font-mono text-accent-light">₹{maxCap.toLocaleString('en-IN')}</span>
                 </div>
-                <input 
-                  type="number" 
-                  value={localSettings.risk?.maxCapitalPerTrade ?? ''} 
+                <input
+                  type="number"
+                  value={localSettings.risk?.maxCapitalPerTrade ?? ''}
                   onChange={(e) => handleRiskChange('maxCapitalPerTrade', e.target.value)}
-                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors"
                   placeholder="4000"
                 />
                 <div className="p-2 rounded bg-surface-800/80 border border-surface-700/60 text-[11px] text-surface-400 flex items-start gap-1.5">
@@ -298,11 +335,11 @@ const Settings: React.FC = () => {
                   <label className="block text-surface-300 text-xs font-semibold">1R Risk Budget Per Trade (₹)</label>
                   <span className="text-[11px] font-mono text-accent-light">₹{Number(localSettings.risk?.riskPerTrade || 500).toLocaleString('en-IN')}</span>
                 </div>
-                <input 
-                  type="number" 
-                  value={localSettings.risk?.riskPerTrade ?? ''} 
+                <input
+                  type="number"
+                  value={localSettings.risk?.riskPerTrade ?? ''}
                   onChange={(e) => handleRiskChange('riskPerTrade', e.target.value)}
-                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors"
                   placeholder="500"
                 />
                 <div className="p-2 rounded bg-surface-800/80 border border-surface-700/60 text-[11px] text-surface-400 flex items-start gap-1.5">
@@ -319,11 +356,11 @@ const Settings: React.FC = () => {
                   <label className="block text-surface-300 text-xs font-semibold">Max Daily Loss Cutoff (₹)</label>
                   <span className="text-[11px] font-mono text-loss-light">-₹{Number(localSettings.risk?.maxDailyLoss || 0).toLocaleString('en-IN')}</span>
                 </div>
-                <input 
-                  type="number" 
-                  value={localSettings.risk?.maxDailyLoss ?? ''} 
+                <input
+                  type="number"
+                  value={localSettings.risk?.maxDailyLoss ?? ''}
                   onChange={(e) => handleRiskChange('maxDailyLoss', e.target.value)}
-                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors"
                   placeholder="800"
                 />
                 <p className="text-[11px] text-surface-500">
@@ -334,11 +371,11 @@ const Settings: React.FC = () => {
               {/* Max Simultaneous Positions */}
               <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
                 <label className="block text-surface-300 text-xs font-semibold">Max Simultaneous Positions</label>
-                <input 
-                  type="number" 
-                  value={localSettings.risk?.maxSimultaneousPositions ?? ''} 
+                <input
+                  type="number"
+                  value={localSettings.risk?.maxSimultaneousPositions ?? ''}
                   onChange={(e) => handleRiskChange('maxSimultaneousPositions', e.target.value)}
-                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors"
                   placeholder="4"
                 />
                 <p className="text-[11px] text-surface-500">
@@ -349,11 +386,11 @@ const Settings: React.FC = () => {
               {/* Max Daily Trades */}
               <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
                 <label className="block text-surface-300 text-xs font-semibold">Max Trades Per Day (6–8)</label>
-                <input 
-                  type="number" 
-                  value={localSettings.risk?.maxDailyTrades ?? ''} 
+                <input
+                  type="number"
+                  value={localSettings.risk?.maxDailyTrades ?? ''}
                   onChange={(e) => handleRiskChange('maxDailyTrades', e.target.value)}
-                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors"
                   placeholder="8"
                 />
                 <p className="text-[11px] text-surface-500">
@@ -369,9 +406,9 @@ const Settings: React.FC = () => {
                     <p className="text-[11px] text-surface-500">Automatically closes open positions before market close.</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer" 
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
                       checked={localSettings.risk?.autoSquareOff ?? true}
                       onChange={(e) => handleRiskChange('autoSquareOff', e.target.checked)}
                     />
@@ -380,12 +417,12 @@ const Settings: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-surface-400 text-[11px] mb-1">Square Off Cutoff Time</label>
-                  <input 
-                    type="time" 
-                    value={localSettings.risk?.squareOffTime || '15:15'} 
+                  <input
+                    type="time"
+                    value={localSettings.risk?.squareOffTime || '15:15'}
                     onChange={(e) => handleRiskChange('squareOffTime', e.target.value)}
                     disabled={!(localSettings.risk?.autoSquareOff ?? true)}
-                    className={`w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-1.5 text-white font-mono text-sm focus:border-accent-light outline-none ${!(localSettings.risk?.autoSquareOff ?? true) ? 'opacity-40 cursor-not-allowed' : ''}`} 
+                    className={`w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-1.5 text-white font-mono text-sm focus:border-accent-light outline-none ${!(localSettings.risk?.autoSquareOff ?? true) ? 'opacity-40 cursor-not-allowed' : ''}`}
                   />
                 </div>
               </div>
@@ -398,9 +435,9 @@ const Settings: React.FC = () => {
                     <p className="text-[11px] text-surface-500">Inhibits false-breakout strategies when ADX &lt; 20 or during choppy consolidation squeeze.</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer" 
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
                       checked={localSettings.risk?.marketRegimeFilterEnabled ?? true}
                       onChange={(e) => handleRiskChange('marketRegimeFilterEnabled', e.target.checked)}
                     />
@@ -423,9 +460,9 @@ const Settings: React.FC = () => {
                     </p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer" 
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
                       checked={localSettings.risk?.pullbackEntryEnabled ?? false}
                       onChange={(e) => handleRiskChange('pullbackEntryEnabled', e.target.checked)}
                     />
@@ -435,6 +472,56 @@ const Settings: React.FC = () => {
                 <div className="flex items-center justify-between text-[11px] text-surface-400 font-mono">
                   <span className={!(localSettings.risk?.pullbackEntryEnabled ?? false) ? 'text-profit-light font-bold' : 'text-surface-500'}>⚡ Direct Breakout Entry (Instant)</span>
                   <span className={(localSettings.risk?.pullbackEntryEnabled ?? false) ? 'text-accent-light font-bold' : 'text-surface-500'}>🎯 Value Pullback Retest</span>
+                </div>
+              </div>
+
+              {/* Execution Timeframe Toggle: 5m vs 15m */}
+              <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clock size={16} className="text-accent-light" />
+                    <div>
+                      <label className="block text-surface-300 text-xs font-semibold">Candle Execution Timeframe</label>
+                      <p className="text-[11px] text-surface-500">
+                        Select candle interval for Live Agent Engine, Paper Trading &amp; Scanner.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 bg-surface-950 p-1.5 rounded-xl border border-surface-800">
+                  <button
+                    type="button"
+                    onClick={() => handleTimeframeChange('5minute')}
+                    className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${!is15m
+                      ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
+                      : 'text-surface-400 hover:text-white hover:bg-surface-800/50 border border-transparent'
+                      }`}
+                  >
+                    <span>⚡ 5-Minute</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-800 text-surface-400 font-mono">Fast</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleTimeframeChange('15minute')}
+                    className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${is15m
+                      ? 'bg-profit-dark/30 text-profit-light border border-profit/40 shadow-sm'
+                      : 'text-surface-400 hover:text-white hover:bg-surface-800/50 border border-transparent'
+                      }`}
+                  >
+                    <span>⏱️ 15-Minute</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-profit-dark/40 text-profit-light font-mono font-bold">Recommended</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-surface-400 font-mono">
+                  <span className={is15m ? 'text-profit-light font-bold' : 'text-accent-light font-bold'}>
+                    {is15m ? '⏱️ 15m Active' : '⚡ 5m Active'}
+                  </span>
+                  <span className="text-surface-500 text-[10px]">
+                    {is15m ? 'Filters ~60% noise • Lower friction' : 'Fast entries • High-frequency momentum'}
+                  </span>
                 </div>
               </div>
 
@@ -453,9 +540,9 @@ const Settings: React.FC = () => {
                     </div>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer" 
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
                       checked={localSettings.risk?.microstructureFilterEnabled ?? true}
                       onChange={(e) => handleRiskChange('microstructureFilterEnabled', e.target.checked)}
                     />
@@ -466,13 +553,13 @@ const Settings: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-1">
                   <div>
                     <label className="block text-surface-400 text-[11px] mb-1 font-medium">Min RVOL (Surge)</label>
-                    <input 
-                      type="number" 
-                      step="0.1" 
-                      value={localSettings.risk?.microstructureMinRvol ?? '1.2'} 
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={localSettings.risk?.microstructureMinRvol ?? '1.2'}
                       onChange={(e) => handleRiskChange('microstructureMinRvol', e.target.value)}
                       disabled={!(localSettings.risk?.microstructureFilterEnabled ?? true)}
-                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none"
                       placeholder="1.2"
                     />
                     <span className="text-[10px] text-surface-500 mt-0.5 block">≥ 1.2× 20-period MA</span>
@@ -480,13 +567,13 @@ const Settings: React.FC = () => {
 
                   <div>
                     <label className="block text-surface-400 text-[11px] mb-1 font-medium">Max Rejection Wick</label>
-                    <input 
-                      type="number" 
-                      step="0.05" 
-                      value={localSettings.risk?.microstructureMaxWick ?? '0.25'} 
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={localSettings.risk?.microstructureMaxWick ?? '0.25'}
                       onChange={(e) => handleRiskChange('microstructureMaxWick', e.target.value)}
                       disabled={!(localSettings.risk?.microstructureFilterEnabled ?? true)}
-                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none"
                       placeholder="0.25"
                     />
                     <span className="text-[10px] text-surface-500 mt-0.5 block">≤ 25% candle range</span>
@@ -494,13 +581,13 @@ const Settings: React.FC = () => {
 
                   <div>
                     <label className="block text-surface-400 text-[11px] mb-1 font-medium">Min Local KER (Chop)</label>
-                    <input 
-                      type="number" 
-                      step="0.05" 
-                      value={localSettings.risk?.microstructureMinKer ?? '0.30'} 
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={localSettings.risk?.microstructureMinKer ?? '0.30'}
                       onChange={(e) => handleRiskChange('microstructureMinKer', e.target.value)}
                       disabled={!(localSettings.risk?.microstructureFilterEnabled ?? true)}
-                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none"
                       placeholder="0.30"
                     />
                     <span className="text-[10px] text-surface-500 mt-0.5 block">≥ 0.30 efficiency</span>
@@ -510,9 +597,9 @@ const Settings: React.FC = () => {
                     <label className="block text-surface-400 text-[11px] mb-1 font-medium">Midday Lull Guard</label>
                     <div className="flex items-center h-8">
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          className="sr-only peer" 
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
                           checked={localSettings.risk?.microstructureMiddayGuard ?? true}
                           onChange={(e) => handleRiskChange('microstructureMiddayGuard', e.target.checked)}
                           disabled={!(localSettings.risk?.microstructureFilterEnabled ?? true)}
@@ -532,12 +619,12 @@ const Settings: React.FC = () => {
                   <label className="block text-surface-300 text-xs font-semibold">Default Stop Loss (%)</label>
                   <span className="text-[11px] font-mono text-loss-light font-bold">-{slPct}%</span>
                 </div>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   step="0.1"
-                  value={localSettings.risk?.defaultStopLossPercent ?? ''} 
+                  value={localSettings.risk?.defaultStopLossPercent ?? ''}
                   onChange={(e) => handleRiskChange('defaultStopLossPercent', e.target.value)}
-                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors"
                   placeholder="1.2"
                 />
                 <p className="text-[11px] text-surface-500">
@@ -551,12 +638,12 @@ const Settings: React.FC = () => {
                   <label className="block text-surface-300 text-xs font-semibold">Default Profit Target (%)</label>
                   <span className="text-[11px] font-mono text-profit-light font-bold">+{tgtPct}%</span>
                 </div>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   step="0.1"
-                  value={localSettings.risk?.defaultTargetPercent ?? ''} 
+                  value={localSettings.risk?.defaultTargetPercent ?? ''}
                   onChange={(e) => handleRiskChange('defaultTargetPercent', e.target.value)}
-                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors" 
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono focus:border-accent-light outline-none transition-colors"
                   placeholder="2.4"
                 />
                 <p className="text-[11px] text-surface-500">
@@ -574,9 +661,9 @@ const Settings: React.FC = () => {
                     </p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer" 
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
                       checked={localSettings.risk?.trailingSlEnabled ?? true}
                       onChange={(e) => handleRiskChange('trailingSlEnabled', e.target.checked)}
                     />
@@ -586,25 +673,25 @@ const Settings: React.FC = () => {
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div>
                     <label className="block text-surface-400 text-[11px] mb-1">ATR Multiplier</label>
-                    <input 
-                      type="number" 
-                      step="0.1" 
-                      value={localSettings.risk?.trailingSlAtrMultiplier ?? '1.4'} 
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={localSettings.risk?.trailingSlAtrMultiplier ?? '1.4'}
                       onChange={(e) => handleRiskChange('trailingSlAtrMultiplier', e.target.value)}
                       disabled={!(localSettings.risk?.trailingSlEnabled ?? true)}
-                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none"
                       placeholder="1.4"
                     />
                   </div>
                   <div>
                     <label className="block text-surface-400 text-[11px] mb-1">Profit Cushion (R)</label>
-                    <input 
-                      type="number" 
-                      step="0.1" 
-                      value={localSettings.risk?.trailingSlProfitCushionR ?? '1.2'} 
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={localSettings.risk?.trailingSlProfitCushionR ?? '1.2'}
                       onChange={(e) => handleRiskChange('trailingSlProfitCushionR', e.target.value)}
                       disabled={!(localSettings.risk?.trailingSlEnabled ?? true)}
-                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                      className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none"
                       placeholder="1.2"
                     />
                   </div>
@@ -624,9 +711,9 @@ const Settings: React.FC = () => {
                     </p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer" 
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
                       checked={localSettings.risk?.partialBookingEnabled ?? false}
                       onChange={(e) => handleRiskChange('partialBookingEnabled', e.target.checked)}
                     />
@@ -635,13 +722,13 @@ const Settings: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-surface-400 text-[11px] mb-1">Target 1 Multiple (R:R)</label>
-                  <input 
-                    type="number" 
-                    step="0.1" 
-                    value={localSettings.risk?.partialBookingTargetRR ?? '1.2'} 
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={localSettings.risk?.partialBookingTargetRR ?? '1.2'}
                     onChange={(e) => handleRiskChange('partialBookingTargetRR', e.target.value)}
                     disabled={!(localSettings.risk?.partialBookingEnabled ?? false)}
-                    className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none" 
+                    className="w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs focus:border-accent-light outline-none"
                     placeholder="1.2"
                   />
                 </div>
@@ -711,9 +798,9 @@ const Settings: React.FC = () => {
                 </div>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="sr-only peer" 
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
                   checked={localSettings.notifications?.telegram?.enabled ?? false}
                   onChange={(e) => handleTelegramChange('enabled', e.target.checked)}
                 />
@@ -739,11 +826,11 @@ const Settings: React.FC = () => {
               {/* Bot Token */}
               <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
                 <label className="block text-surface-300 text-xs font-semibold">Telegram Bot Token</label>
-                <input 
-                  type="password" 
-                  value={localSettings.notifications?.telegram?.botToken || ''} 
+                <input
+                  type="password"
+                  value={localSettings.notifications?.telegram?.botToken || ''}
                   onChange={(e) => handleTelegramChange('botToken', e.target.value)}
-                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono text-xs focus:border-sky-400 outline-none transition-colors" 
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono text-xs focus:border-sky-400 outline-none transition-colors"
                   placeholder="e.g. 7123456789:AAFxxx..."
                 />
                 <p className="text-[11px] text-surface-500">
@@ -754,11 +841,11 @@ const Settings: React.FC = () => {
               {/* Chat ID */}
               <div className="bg-surface-900/50 p-4 rounded-xl border border-surface-800 space-y-2">
                 <label className="block text-surface-300 text-xs font-semibold">Your Chat ID</label>
-                <input 
-                  type="text" 
-                  value={localSettings.notifications?.telegram?.chatId || ''} 
+                <input
+                  type="text"
+                  value={localSettings.notifications?.telegram?.chatId || ''}
                   onChange={(e) => handleTelegramChange('chatId', e.target.value)}
-                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono text-xs focus:border-sky-400 outline-none transition-colors" 
+                  className="w-full bg-surface-900 border border-surface-700 rounded-lg px-4 py-2 text-white font-mono text-xs focus:border-sky-400 outline-none transition-colors"
                   placeholder="e.g. 987654321"
                 />
                 <p className="text-[11px] text-surface-500">
@@ -771,8 +858,8 @@ const Settings: React.FC = () => {
                 <span className="text-xs font-semibold text-surface-300 block">Notification Events</span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label className="flex items-center gap-2.5 text-xs text-surface-300 cursor-pointer">
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       checked={localSettings.notifications?.telegram?.notifyOnTradeExit ?? true}
                       onChange={(e) => handleTelegramChange('notifyOnTradeExit', e.target.checked)}
                       className="rounded border-surface-700 text-sky-500 focus:ring-0 w-4 h-4 bg-surface-900 cursor-pointer"
@@ -780,8 +867,8 @@ const Settings: React.FC = () => {
                     <span>Notify on Trade Exit (Target / Stop Loss Hit)</span>
                   </label>
                   <label className="flex items-center gap-2.5 text-xs text-surface-300 cursor-pointer">
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       checked={localSettings.notifications?.telegram?.notifyOnSessionEnd ?? true}
                       onChange={(e) => handleTelegramChange('notifyOnSessionEnd', e.target.checked)}
                       className="rounded border-surface-700 text-sky-500 focus:ring-0 w-4 h-4 bg-surface-900 cursor-pointer"
@@ -818,16 +905,16 @@ const Settings: React.FC = () => {
           </section>
         </div>
       </div>
-      
+
       <div className="flex justify-end items-center gap-4 pb-8 pt-2">
-        <button 
+        <button
           onClick={resetToDefaults}
           className="flex items-center gap-2 px-5 py-2.5 bg-surface-800 hover:bg-surface-700 border border-surface-700 rounded-xl text-surface-300 hover:text-white font-medium text-sm transition-all"
         >
           <RotateCcw size={15} />
           <span>Reset to Defaults</span>
         </button>
-        <button 
+        <button
           onClick={saveChanges}
           disabled={isSaving}
           className="flex items-center gap-2 px-6 py-2.5 bg-accent hover:bg-accent-light disabled:opacity-60 text-surface-950 font-bold rounded-xl text-sm transition-all shadow-lg shadow-accent/20 cursor-pointer disabled:cursor-not-allowed"
