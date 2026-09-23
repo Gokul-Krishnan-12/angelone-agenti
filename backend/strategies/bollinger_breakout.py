@@ -32,6 +32,10 @@ class BollingerBreakoutStrategy(BaseStrategy):
 
         vol_confirmed = last["volume"] > (last["vol_sma"] * 1.5)  # 50% volume spike
 
+        # Calculate dynamic confidence scaled with volume surge (80 - 88)
+        vol_surge = float(last.get("volume", 0)) / max(1.0, float(prev.get("volume", 1)))
+        confidence = min(88, int(80 + max(0.0, vol_surge - 1.2) * 5))
+
         # BUY Condition (Breakout above upper band)
         if (
             prev["close"] <= prev["bb_high"]
@@ -46,15 +50,15 @@ class BollingerBreakoutStrategy(BaseStrategy):
                 self.format_signal(
                     tradingsymbol,
                     "BUY",
-                    80,
+                    confidence,
                     entry,
                     sl,
                     target,
                     round(abs(target - last["close"]) / abs(last["close"] - sl), 2)
                     if last["close"] != sl
                     else 0,
-                    "Bollinger upper band breakout with volume spike",
-                    {"bb_high": last["bb_high"]},
+                    f"Bollinger upper band breakout with volume spike ({vol_surge:.2f}x)",
+                    {"bb_high": last["bb_high"], "vol_surge": round(vol_surge, 2)},
                 )
             )
 
@@ -72,15 +76,15 @@ class BollingerBreakoutStrategy(BaseStrategy):
                 self.format_signal(
                     tradingsymbol,
                     "SELL",
-                    80,
+                    confidence,
                     entry,
                     sl,
                     target,
                     round(abs(target - last["close"]) / abs(last["close"] - sl), 2)
                     if last["close"] != sl
                     else 0,
-                    "Bollinger lower band breakdown with volume spike",
-                    {"bb_low": last["bb_low"]},
+                    f"Bollinger lower band breakdown with volume spike ({vol_surge:.2f}x)",
+                    {"bb_low": last["bb_low"], "vol_surge": round(vol_surge, 2)},
                 )
             )
 

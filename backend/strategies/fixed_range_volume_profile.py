@@ -23,10 +23,12 @@ import pandas as pd
 from .base import BaseStrategy
 from .utils import (
     compute_atr,
+    compute_prior_session_value_area,
     compute_relative_volume,
     compute_volume_profile,
     is_initiative_candle,
     is_lvn_vacuum,
+    is_value_area_retest,
 )
 
 LOOKBACK_BARS = 80
@@ -42,8 +44,8 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
     def get_description(self) -> str:
         return (
             "Detects high-conviction institutional auction acceptance and rejections using "
-            "Point of Control (POC), Value Area High (VAH), and Value Area Low (VAL) "
-            "with LVN vacuum and 2-bar acceptance filtering."
+            "Point of Control (POC), Value Area High (VAH), Value Area Low (VAL), "
+            "Dalton 80% Rule, Developing POC Migration, and LVN vacuum filtering."
         )
 
     def _get_bar_time(self, df: pd.DataFrame, idx: int = -1) -> Optional[datetime.time]:
@@ -54,6 +56,9 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
                 return dt.time()
             if "timestamp" in df.columns:
                 dt = pd.to_datetime(df["timestamp"].iloc[idx])
+                return dt.time()
+            if "date" in df.columns:
+                dt = pd.to_datetime(df["date"].iloc[idx])
                 return dt.time()
             if isinstance(df.index, pd.DatetimeIndex):
                 return df.index[idx].time()
@@ -74,6 +79,7 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
         poc = float(profile["poc"])
         vah = float(profile["value_area_high"])
         val = float(profile["value_area_low"])
+        poc_migration_ratio = float(profile.get("poc_migration_ratio", 0.5))
 
         if vah <= val or poc <= 0:
             return []
@@ -106,7 +112,6 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
         # Execution Guardrail: Midday Value Lull (11:30 - 13:30 IST)
         bar_time = self._get_bar_time(df, -1)
         if bar_time is None:
-            # Fallback to current system time in IST
             now_ist = datetime.datetime.now(
                 datetime.timezone(datetime.timedelta(hours=5, minutes=30))
             )
@@ -117,16 +122,32 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
             and datetime.time(11, 30) <= bar_time <= datetime.time(13, 30)
         )
 
-        # Execution Guardrail: Friction Buffer (net gain to Target 1 >= 4.0x round-trip friction)
-        # Indian intraday cash equity friction (brokerage + STT + turnover + GST + slippage) ~ 0.09%
         friction_per_share = curr_close * 0.0009
+
+        # Module C: Higher Timeframe Value Area & Virgin POC (vPOC) Filter
+        prior_va = compute_prior_session_value_area(df)
+        v_poc_blocked_buy = False
+        v_poc_blocked_sell = False
+        if prior_va and prior_va.get("is_virgin_poc"):
+            pd_poc = float(prior_va["pd_poc"])
+            # If entry is within 0.5% directly below prior day virgin POC, resistance is too close
+            if curr_close < pd_poc and (pd_poc - curr_close) / max(0.01, curr_close) <= 0.005:
+                v_poc_blocked_buy = True
+            # If entry is within 0.5% directly above prior day virgin POC, support is too close
+            if curr_close > pd_poc and (curr_close - pd_poc) / max(0.01, curr_close) <= 0.005:
+                v_poc_blocked_sell = True
 
         signals: List[Dict[str, Any]] = []
 
-        # ── Setup 1: Bullish VAH Breakout (Auction Expansion Upward) ─────────
+        # ── Setup 1: Bullish VAH Breakout & Retest (Auction Expansion Upward) ─
+        # Requires Developing POC migration (>= 0.35) and no overhead virgin POC collision
+        poc_migrated_buy = poc_migration_ratio >= 0.35
+        poc_migrated_sell = poc_migration_ratio <= 0.65
         if (
             not is_va_compressed
             and not is_midday_lull
+            and not v_poc_blocked_buy
+            and poc_migrated_buy
             and prev_2_close <= vah
             and prev_close > vah
             and curr_close > vah
@@ -136,7 +157,6 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
             and is_lvn_vacuum(profile, "BUY")
         ):
             sl = round(vah - 0.8 * atr, 2)
-            # Never set SL above entry or into POC if within 0.5 * ATR of entry
             if abs(curr_close - poc) <= 0.5 * atr or sl >= curr_close:
                 sl = round(curr_close - 1.2 * atr, 2)
 
@@ -144,14 +164,13 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
             target = round(curr_close + risk * 2.0, 2)
             rr = self.calculate_rr(curr_close, sl, target)
 
-            # Target 1 is at +1.2R
             target1_gain = risk * 1.2
             if target1_gain >= 4.0 * friction_per_share and risk > 0:
                 signals.append(
                     self.format_signal(
                         tradingsymbol=tradingsymbol,
                         direction="BUY",
-                        confidence=88,
+                        confidence=85,
                         entry=curr_close,
                         sl=sl,
                         target=target,
@@ -166,6 +185,7 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
                             "vah": vah,
                             "val": val,
                             "va_width": round(va_width, 2),
+                            "poc_migration_ratio": poc_migration_ratio,
                             "rvol": round(rvol, 2),
                             "atr": round(atr, 2),
                             "setup": "VAH_BREAKOUT",
@@ -174,10 +194,13 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
                     )
                 )
 
-        # ── Setup 2: Bearish VAL Breakdown (Auction Expansion Downward) ───────
+        # ── Setup 2: Bearish VAL Breakdown & Retest (Auction Expansion Downward) ─
+        # Requires Developing POC migration (<= 0.65) and no underlying virgin POC collision
         elif (
             not is_va_compressed
             and not is_midday_lull
+            and not v_poc_blocked_sell
+            and poc_migrated_sell
             and prev_2_close >= val
             and prev_close < val
             and curr_close < val
@@ -200,7 +223,7 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
                     self.format_signal(
                         tradingsymbol=tradingsymbol,
                         direction="SELL",
-                        confidence=88,
+                        confidence=85,
                         entry=curr_close,
                         sl=sl,
                         target=target,
@@ -215,6 +238,7 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
                             "vah": vah,
                             "val": val,
                             "va_width": round(va_width, 2),
+                            "poc_migration_ratio": poc_migration_ratio,
                             "rvol": round(rvol, 2),
                             "atr": round(atr, 2),
                             "setup": "VAL_BREAKDOWN",
@@ -223,8 +247,107 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
                     )
                 )
 
-        # ── Setup 3: Liquidity Sweep (BUY — VAL Sweep & Rejection) ───────────
-        # Mean-reversion setups are permitted even during midday lull and compression
+        # ── Setup 3: Jim Dalton's 80% Rule (Value Area Mean Reversion) ───────
+        # When market opens/trades outside prior day VA and accepts back inside with 2 closes
+        if prior_va is not None and not is_midday_lull:
+            pd_vah = float(prior_va["pd_vah"])
+            pd_val = float(prior_va["pd_val"])
+            pd_poc = float(prior_va["pd_poc"])
+            today_high = float(profile.get("session_high", curr_high))
+            today_low = float(profile.get("session_low", curr_low))
+
+            if pd_vah > pd_val and (pd_vah - pd_val) >= 0.8 * atr:
+                # Bearish 80% Rule: Price traded above pdVAH, now accepts back inside pdVAH
+                if (
+                    (today_high >= pd_vah or prev_2_close >= pd_vah)
+                    and prev_close < pd_vah
+                    and curr_close < pd_vah
+                    and curr_close > pd_val
+                ):
+                    sl = round(pd_vah + 0.4 * atr, 2)
+                    risk = abs(sl - curr_close)
+                    target = round(pd_poc if curr_close > pd_poc else pd_val, 2)
+                    structural_reward = curr_close - target
+                    structural_rr = (structural_reward / risk) if risk > 0 else 0.0
+
+                    if (
+                        structural_rr >= 1.2
+                        and structural_reward >= 4.0 * friction_per_share
+                        and target < curr_close
+                    ):
+                        signals.append(
+                            self.format_signal(
+                                tradingsymbol=tradingsymbol,
+                                direction="SELL",
+                                confidence=85,
+                                entry=curr_close,
+                                sl=sl,
+                                target=target,
+                                rr=round(structural_rr, 2),
+                                reasoning=(
+                                    f"Dalton 80% Rule Bearish Re-entry: 2-bar acceptance inside prior Value Area "
+                                    f"(entry: {curr_close:.2f} < pdVAH: {pd_vah:.2f}, targeting: {target:.2f}, pdVAL: {pd_val:.2f})"
+                                ),
+                                indicators={
+                                    "poc": poc,
+                                    "pd_poc": pd_poc,
+                                    "pd_vah": pd_vah,
+                                    "pd_val": pd_val,
+                                    "target1": target,
+                                    "target2": round(pd_val, 2),
+                                    "atr": round(atr, 2),
+                                    "setup": "DALTON_80_RULE_SHORT",
+                                    "is_structural_target": True,
+                                },
+                            )
+                        )
+
+                # Bullish 80% Rule: Price traded below pdVAL, now accepts back inside pdVAL
+                elif (
+                    (today_low <= pd_val or prev_2_close <= pd_val)
+                    and prev_close > pd_val
+                    and curr_close > pd_val
+                    and curr_close < pd_vah
+                ):
+                    sl = round(pd_val - 0.4 * atr, 2)
+                    risk = abs(curr_close - sl)
+                    target = round(pd_poc if curr_close < pd_poc else pd_vah, 2)
+                    structural_reward = target - curr_close
+                    structural_rr = (structural_reward / risk) if risk > 0 else 0.0
+
+                    if (
+                        structural_rr >= 1.2
+                        and structural_reward >= 4.0 * friction_per_share
+                        and target > curr_close
+                    ):
+                        signals.append(
+                            self.format_signal(
+                                tradingsymbol=tradingsymbol,
+                                direction="BUY",
+                                confidence=85,
+                                entry=curr_close,
+                                sl=sl,
+                                target=target,
+                                rr=round(structural_rr, 2),
+                                reasoning=(
+                                    f"Dalton 80% Rule Bullish Re-entry: 2-bar acceptance inside prior Value Area "
+                                    f"(entry: {curr_close:.2f} > pdVAL: {pd_val:.2f}, targeting: {target:.2f}, pdVAH: {pd_vah:.2f})"
+                                ),
+                                indicators={
+                                    "poc": poc,
+                                    "pd_poc": pd_poc,
+                                    "pd_vah": pd_vah,
+                                    "pd_val": pd_val,
+                                    "target1": target,
+                                    "target2": round(pd_vah, 2),
+                                    "atr": round(atr, 2),
+                                    "setup": "DALTON_80_RULE_LONG",
+                                    "is_structural_target": True,
+                                },
+                            )
+                        )
+
+        # ── Setup 4: Liquidity Sweep (BUY — VAL Sweep & Rejection) ───────────
         elif (
             curr_low <= (val - 0.2 * atr)
             and curr_close > val
@@ -233,10 +356,8 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
         ):
             sl = round(curr_low - 0.3 * atr, 2)
             risk = abs(curr_close - sl)
-            # Primary target is strictly the Point of Control (POC)
             target = round(poc, 2)
 
-            # Geometry Filter: (POC - entry) / risk >= 1.3
             structural_reward = poc - curr_close
             structural_rr = (structural_reward / risk) if risk > 0 else 0.0
 
@@ -250,7 +371,7 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
                     self.format_signal(
                         tradingsymbol=tradingsymbol,
                         direction="BUY",
-                        confidence=84,
+                        confidence=82,
                         entry=curr_close,
                         sl=sl,
                         target=target,
@@ -271,7 +392,7 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
                     )
                 )
 
-        # ── Setup 4: Liquidity Sweep (SELL — VAH Sweep & Rejection) ──────────
+        # ── Setup 5: Liquidity Sweep (SELL — VAH Sweep & Rejection) ──────────
         elif (
             curr_high >= (vah + 0.2 * atr)
             and curr_close < vah
@@ -280,10 +401,8 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
         ):
             sl = round(curr_high + 0.3 * atr, 2)
             risk = abs(sl - curr_close)
-            # Primary target is strictly the Point of Control (POC)
             target = round(poc, 2)
 
-            # Geometry Filter: (entry - POC) / risk >= 1.3
             structural_reward = curr_close - poc
             structural_rr = (structural_reward / risk) if risk > 0 else 0.0
 
@@ -297,7 +416,7 @@ class FixedRangeVolumeProfileStrategy(BaseStrategy):
                     self.format_signal(
                         tradingsymbol=tradingsymbol,
                         direction="SELL",
-                        confidence=84,
+                        confidence=82,
                         entry=curr_close,
                         sl=sl,
                         target=target,

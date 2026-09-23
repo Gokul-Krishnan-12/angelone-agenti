@@ -1356,15 +1356,17 @@ class TradingEngine:
                     self._exit_position(pos, symbol, reason)
                 continue
 
-            # Rule 3: Idle Trade Circuit Breaker (held >= 20 mins without +0.5R)
+            # Rule 3: Idle Trade Circuit Breaker (held >= 35 mins without +0.6R)
             from .watchdog import watchdog
 
+            stagnation_mins = float(risk_config.get("stagnationTimeoutMins", 35.0))
+            stagnation_r = float(risk_config.get("stagnationMinRequiredR", 0.6))
             idle_exit, idle_reason = watchdog.check_idle_trade_circuit_breaker(
                 trade=trade,
                 ltp=ltp,
                 mins_held=mins_held,
-                stagnation_timeout_mins=float(breakeven_mins),
-                min_required_r=0.5,
+                stagnation_timeout_mins=stagnation_mins,
+                min_required_r=stagnation_r,
             )
             if idle_exit:
                 self._push_log(idle_reason, level="warning")

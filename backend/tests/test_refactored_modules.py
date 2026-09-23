@@ -137,22 +137,22 @@ def test_watchdog_idle_trade_circuit_breaker():
         "entry_price": 1000.0,
         "initial_sl": 980.0,  # 1R = 20.0
     }
-    # 1. Held 15 mins (within window) -> no exit
-    exit_15, _ = watchdog.check_idle_trade_circuit_breaker(
-        trade=trade, ltp=1005.0, mins_held=15.0
+    # 1. Held 25 mins (within 35m window) -> no exit
+    exit_25, _ = watchdog.check_idle_trade_circuit_breaker(
+        trade=trade, ltp=1005.0, mins_held=25.0
     )
-    assert exit_15 is False
+    assert exit_25 is False
 
-    # 2. Held 22 mins with only +0.25R gain (+5.0 profit / 20.0 risk = 0.25R < 0.5R) -> exit!
-    exit_22, reason_22 = watchdog.check_idle_trade_circuit_breaker(
-        trade=trade, ltp=1005.0, mins_held=22.0
+    # 2. Held 36 mins with only +0.25R gain (+5.0 profit / 20.0 risk = 0.25R < 0.6R) -> exit!
+    exit_36, reason_36 = watchdog.check_idle_trade_circuit_breaker(
+        trade=trade, ltp=1005.0, mins_held=36.0
     )
-    assert exit_22 is True
-    assert "Idle trade circuit breaker" in reason_22
+    assert exit_36 is True
+    assert "Idle trade circuit breaker" in reason_36
 
-    # 3. Held 22 mins with +0.75R gain (+15.0 profit / 20.0 risk = 0.75R >= 0.5R) -> keep holding!
+    # 3. Held 36 mins with +0.75R gain (+15.0 profit / 20.0 risk = 0.75R >= 0.6R) -> keep holding!
     exit_good, _ = watchdog.check_idle_trade_circuit_breaker(
-        trade=trade, ltp=1015.0, mins_held=22.0
+        trade=trade, ltp=1015.0, mins_held=36.0
     )
     assert exit_good is False
 

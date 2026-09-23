@@ -606,13 +606,25 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           // Check Stop Loss condition (Trailing SL or Breakeven SL or Initial SL)
           const slHit = isBuy ? effectivePrice <= currentPos.stopLoss : effectivePrice >= currentPos.stopLoss;
 
-          if (targetHit || slHit) {
-            const isTrailingSl = !targetHit && (
+          // ── Idle Trade Circuit Breaker (35 mins without tagging +0.6R) ──
+          const entryMs = new Date(currentPos.entryTime).getTime();
+          const minsHeld = (Date.now() - entryMs) / 60000;
+          const initialRisk = currentPos.initialRisk || Math.abs(currentPos.entryPrice - (currentPos.initialSl || currentPos.stopLoss)) || (currentPos.entryPrice * 0.012);
+          const currentR = initialRisk > 0 ? ((isBuy ? effectivePrice - currentPos.entryPrice : currentPos.entryPrice - effectivePrice) / initialRisk) : 0;
+          const isIdleStagnant = minsHeld >= 35 && currentR < 0.6;
+
+          if (targetHit || slHit || isIdleStagnant) {
+            const isTrailingSl = !targetHit && !isIdleStagnant && (
               (isBuy && currentPos.stopLoss > currentPos.entryPrice) ||
               (!isBuy && currentPos.stopLoss < currentPos.entryPrice)
             );
-            const isBreakeven = currentPos.partialBooked && Math.abs(effectivePrice - currentPos.entryPrice) < currentPos.entryPrice * 0.002;
-            const exitReason: 'TARGET_HIT' | 'STOPLOSS_HIT' = targetHit ? 'TARGET_HIT' : 'STOPLOSS_HIT';
+            const isBreakeven = !isIdleStagnant && currentPos.partialBooked && Math.abs(effectivePrice - currentPos.entryPrice) < currentPos.entryPrice * 0.002;
+            const exitStatus: 'TARGET_HIT' | 'STOPLOSS_HIT' | 'AUTO_SQUARE_OFF' = targetHit
+              ? 'TARGET_HIT'
+              : (isIdleStagnant ? 'AUTO_SQUARE_OFF' : 'STOPLOSS_HIT');
+            const exitReasonText = targetHit
+              ? 'TARGET'
+              : (isIdleStagnant ? 'IDLE_CIRCUIT_BREAKER (Stagnant > 35m without +0.6R)' : (currentPos.partialBooked ? 'BREAKEVEN' : 'STOPLOSS'));
             
             const remainingPnl = currentPnl;
             const totalTradePnl = (currentPos.partialPnl || 0) + remainingPnl;
@@ -627,7 +639,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             if (ordIdx >= 0) {
               updatedOrders[ordIdx] = {
                 ...updatedOrders[ordIdx],
-                status: exitReason,
+                status: exitStatus,
                 exitPrice: effectivePrice,
                 quantity: fullInitialQty,
                 pnl: Math.round(totalTradePnl * 100) / 100,
@@ -636,7 +648,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
                 partialPnl: currentPos.partialPnl,
                 partialExitPrice: currentPos.partialExitPrice,
                 partialExitQty: currentPos.partialExitQty,
-                exitReason: targetHit ? 'TARGET' : (currentPos.partialBooked ? 'BREAKEVEN' : 'STOPLOSS'),
+                exitReason: exitReasonText,
                 exitTime: new Date().toISOString()
               };
             }
@@ -650,6 +662,11 @@ export const usePaperTradingStore = create<PaperTradingState>()(
               logsToAdd.push({
                 type: 'TARGET',
                 message: `🚀 TRAILING STOP HIT: ${currentPos.tradingsymbol} closed at ₹${effectivePrice.toFixed(2)} in profit! Net P&L: +₹${totalTradePnl.toFixed(2)} (+${totalTradePnlPercent.toFixed(2)}%)`
+              });
+            } else if (isIdleStagnant) {
+              logsToAdd.push({
+                type: 'EXIT',
+                message: `⏱️ IDLE CIRCUIT BREAKER: ${currentPos.tradingsymbol} held for ${minsHeld.toFixed(0)}m without reaching +0.6R (${currentR.toFixed(2)}R). Closed at ₹${effectivePrice.toFixed(2)} to free frozen capital. Net P&L: ${totalTradePnl >= 0 ? '+' : ''}₹${totalTradePnl.toFixed(2)}.`
               });
             } else {
               logsToAdd.push({
@@ -669,7 +686,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
               quantity: fullInitialQty,
               pnl: Math.round(totalTradePnl * 100) / 100,
               pnlPercent: Math.round(totalTradePnlPercent * 100) / 100,
-              exitReason: targetHit ? 'TARGET' : (currentPos.partialBooked ? 'BREAKEVEN' : 'STOPLOSS'),
+              exitReason: exitReasonText,
               mode: 'Paper Trading'
             };
             if (window.electronAPI?.telegram?.sendExit) {

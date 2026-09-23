@@ -172,14 +172,14 @@ class TradeWatchdog:
         trade: Dict[str, Any],
         ltp: float,
         mins_held: float,
-        stagnation_timeout_mins: float = 20.0,
-        min_required_r: float = 0.5,
+        stagnation_timeout_mins: float = 35.0,
+        min_required_r: float = 0.6,
     ) -> Tuple[bool, str]:
         """
         Check if an open position is stagnant and drifting in noise without momentum.
 
         Rule:
-        If a position is held for >= 20 minutes and fails to achieve at least +0.5R,
+        If a position is held for >= 35 minutes and fails to achieve at least +0.6R,
         exit immediately at market.
 
         Returns

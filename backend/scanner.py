@@ -529,6 +529,17 @@ class Scanner:
         best["allStrategies"] = [
             s.get("strategy", s.get("_strategy_id", "")) for s in dir_signals
         ]
+
+        # Multi-strategy confluence calibration: reflect true combination rather than single default
+        unique_strat_names = list(dict.fromkeys(
+            s.get("strategy", s.get("_strategy_id", "")) for s in dir_signals if s.get("strategy")
+        ))
+        if len(unique_strat_names) >= 2:
+            other_names = [n for n in unique_strat_names if n != best.get("strategy")]
+            if other_names:
+                best["compositeStrategy"] = f"{best.get('strategy')} + {', '.join(other_names)}"
+                # Multi-family confidence boost (+2% per additional independent family)
+                best["confidence"] = min(92, best.get("confidence", 80) + (confluence_score - 1) * 2)
         if regime_meta is not None:
             best["marketRegime"] = regime_meta.regime
             best["adx"] = regime_meta.adx

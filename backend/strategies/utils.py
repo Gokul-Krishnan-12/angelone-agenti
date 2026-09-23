@@ -155,6 +155,9 @@ def compute_volume_profile(
             "bin_size": max(0.01, (h - l) / n_bins),
             "price_min": l,
             "price_max": h,
+            "session_high": h,
+            "session_low": l,
+            "poc_migration_ratio": 0.5,
             "n_bins": n_bins,
             "poc_bin": 0,
             "poc_volume": 0.0,
@@ -171,6 +174,8 @@ def compute_volume_profile(
             dt_series = pd.to_datetime(df["datetime"])
         elif "timestamp" in df.columns:
             dt_series = pd.to_datetime(df["timestamp"])
+        elif "date" in df.columns:
+            dt_series = pd.to_datetime(df["date"])
         elif isinstance(df.index, pd.DatetimeIndex):
             dt_series = pd.Series(df.index)
 
@@ -197,6 +202,9 @@ def compute_volume_profile(
             "bin_size": 0.01,
             "price_min": price_min,
             "price_max": price_max,
+            "session_high": price_max,
+            "session_low": price_min,
+            "poc_migration_ratio": 0.5,
             "n_bins": n_bins,
             "poc_bin": 0,
             "poc_volume": 0.0,
@@ -235,6 +243,12 @@ def compute_volume_profile(
     va_low = price_min + min_va_bin * bin_size
     va_high = price_min + (max_va_bin + 1) * bin_size
 
+    migration_ratio = (
+        round((poc - price_min) / (price_max - price_min), 4)
+        if price_max > price_min
+        else 0.5
+    )
+
     return {
         "poc": round(poc, 2),
         "value_area_low": round(va_low, 2),
@@ -243,12 +257,114 @@ def compute_volume_profile(
         "bin_size": bin_size,
         "price_min": price_min,
         "price_max": price_max,
+        "session_high": price_max,
+        "session_low": price_min,
+        "poc_migration_ratio": migration_ratio,
         "n_bins": n_bins,
         "poc_bin": poc_bin,
         "poc_volume": poc_vol,
         "vah_bin": max_va_bin,
         "val_bin": min_va_bin,
     }
+
+
+def compute_prior_session_value_area(
+    df: pd.DataFrame, n_bins: int = 30
+) -> Optional[dict]:
+    """
+    Extract prior session's OHLCV candles and compute prior day Value Area:
+    pd_poc, pd_vah, pd_val, and check if pd_poc is a virgin POC (untested by current session).
+    """
+    if df is None or len(df) < 20:
+        return None
+
+    dt_series = None
+    if "datetime" in df.columns:
+        dt_series = pd.to_datetime(df["datetime"])
+    elif "timestamp" in df.columns:
+        dt_series = pd.to_datetime(df["timestamp"])
+    elif "date" in df.columns:
+        dt_series = pd.to_datetime(df["date"])
+    elif isinstance(df.index, pd.DatetimeIndex):
+        dt_series = pd.Series(df.index)
+
+    if dt_series is None or len(dt_series) == 0:
+        return None
+
+    try:
+        valid_dates = [d.date() for d in dt_series if pd.notna(d)]
+        unique_dates = sorted(list(set(valid_dates)))
+        if len(unique_dates) < 2:
+            return None
+
+        curr_date = unique_dates[-1]
+        prior_date = unique_dates[-2]
+
+        prior_mask = dt_series.apply(
+            lambda x: x.date() == prior_date if pd.notna(x) else False
+        )
+        curr_mask = dt_series.apply(
+            lambda x: x.date() == curr_date if pd.notna(x) else False
+        )
+
+        prior_df = df.loc[prior_mask]
+        curr_df = df.loc[curr_mask]
+
+        if len(prior_df) < 5:
+            return None
+
+        prior_profile = compute_volume_profile(
+            prior_df, n_bars=len(prior_df), n_bins=n_bins, anchor_session=False
+        )
+        pd_poc = float(prior_profile["poc"])
+        pd_vah = float(prior_profile["value_area_high"])
+        pd_val = float(prior_profile["value_area_low"])
+
+        # Check if prior POC was touched during current session
+        is_virgin = True
+        if len(curr_df) > 0:
+            touched = (
+                (curr_df["low"] <= pd_poc) & (curr_df["high"] >= pd_poc)
+            ).any()
+            is_virgin = not bool(touched)
+
+        return {
+            "pd_poc": pd_poc,
+            "pd_vah": pd_vah,
+            "pd_val": pd_val,
+            "is_virgin_poc": is_virgin,
+            "prior_profile": prior_profile,
+        }
+    except Exception:
+        return None
+
+
+def is_value_area_retest(
+    curr: pd.Series | dict,
+    prev: pd.Series | dict,
+    vah_or_val: float,
+    direction: str,
+    atr: float,
+) -> bool:
+    """
+    Validate that price tested the Value Area boundary and showed rejection wick absorption.
+    """
+    c_open = float(curr["open"])
+    c_close = float(curr["close"])
+    c_high = float(curr["high"])
+    c_low = float(curr["low"])
+    c_range = max(0.001, c_high - c_low)
+
+    if direction == "BUY":
+        tested = c_low <= (vah_or_val + 0.35 * atr)
+        held = c_close >= (vah_or_val - 0.15 * atr)
+        lower_wick = (min(c_open, c_close) - c_low) / c_range
+        return tested and held and (lower_wick >= 0.30 or c_close > c_open)
+    else:
+        tested = c_high >= (vah_or_val - 0.35 * atr)
+        held = c_close <= (vah_or_val + 0.15 * atr)
+        upper_wick = (c_high - max(c_open, c_close)) / c_range
+        return tested and held and (upper_wick >= 0.30 or c_close < c_open)
 
 
 def is_lvn_vacuum(profile: dict, direction: str) -> bool:

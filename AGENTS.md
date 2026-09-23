@@ -181,7 +181,7 @@ Signal Triggered
 Open positions are checked every 60 seconds against current market signals:
 1. **Rule 1 (Strong Opposing Signal)**: If $\ge 2$ opposing signals fire with $0$ supporting signals $\rightarrow$ Immediate thesis exit.
 2. **Rule 2 (Weak Conviction)**: If $0$ supporting signals, position is in loss, and held for $\ge 15$ minutes $\rightarrow$ Immediate exit.
-3. **Rule 3 (Idle Trade Circuit Breaker)**: If held for $\ge 20$ minutes without tagging $+0.5R$ $\rightarrow$ Immediate market exit to eliminate stagnation and capital lockup.
+3. **Rule 3 (Idle Trade Circuit Breaker)**: If held for $\ge 35$ minutes without tagging $+0.6R$ $\rightarrow$ Immediate market exit to eliminate stagnation and capital lockup (synchronized across `watchdog.py`, `trading_engine.py`, and `paper-trading-store.ts`).
 4. **Rule 3b (Time Decay)**: If held for $\ge 20$ minutes and in profit $\rightarrow$ Stop-loss is tightened to Breakeven.
 5. **Rule 4 (Thesis Valid)**: If supporting signals $> 0 \rightarrow$ Position held.
 
@@ -287,11 +287,16 @@ Every candidate signal must clear the following sequentially:
    - **Intraday Expansion Clamping**: For breakout/trend trades, targets are capped at $\le 3.2\%$ from entry (or $1.8\times \text{ATR}$) and total day expansion is capped at $\le 4.5\%$ from day open. If remaining runway yields $\text{R:R} < 1.8$, the trade is dropped rather than setting unrealistic 7–8% targets.
 8. **High-Conviction FRVP Strategy ([backend/strategies/fixed_range_volume_profile.py](file:///home/gokul/Desktop/angelone-agenti/backend/strategies/fixed_range_volume_profile.py))**:
    - **Session-Anchored Profile**: Anchored from 09:15 IST session open (fallback: 80 bars rolling, 30 bins).
+   - **Developing POC Migration Confirmation**: Directional momentum requires institutional POC migration: BUY setups require $\text{POC Migration Ratio} \ge 0.35$ (POC in upper 65% of day's range); SELL setups require $\le 0.65$ (POC in lower 65% of day's range).
+   - **Higher Timeframe (HTF) Prior-Day Value Area & Virgin POC (vPOC) Filter**: Prior session VAH, VAL, and POC (`pd_vah`, `pd_val`, `pd_poc`) are tracked. If an unmitigated virgin POC lies directly overhead within $\le 0.5\%$, breakout trades are blocked to avoid buying directly into unhedged institutional inventory overhang.
+   - **Jim Dalton's 80% Rule (Value Area Mean Reversion)**: When price opens or trades outside the prior day's Value Area and then accepts back inside with 2 consecutive bar closes inside the range, an 80% probability mean-reversion trade triggers (`DALTON_80_RULE_LONG` / `DALTON_80_RULE_SHORT`). Primary Target 1 is `pd_poc` (if not already crossed), and structural Target 2 is the opposite boundary of the prior Value Area (`pd_vah` or `pd_val`).
+   - **Mandatory Value Area Retest & Wick Rejection**: Breakout entries require price to break outside the Value Area, pull back to retest VAH/VAL/VWAP with volume contraction, and leave a clear rejection wick before continuation.
    - **Compression Guard**: Suppresses breakouts if $\text{VA\_Width} = (\text{VAH} - \text{VAL}) / \text{ATR} < 1.8$.
    - **LVN Vacuum Filter**: Breakout requires adjacent target bins outside value area to have $< 40\%$ of POC volume (avoids overhead HVNs).
    - **2-Bar Acceptance**: Requires 2 consecutive bar closes outside VAH/VAL with initiative candle quality and volume expansion $\ge 1.25\times$.
    - **Strict POC Target for Rejections**: VAL/VAH liquidity sweeps target strictly the Point of Control with $\text{R:R} \ge 1.3$.
    - **Midday Lull**: Suppresses breakouts between 11:30 and 13:30 IST; permits only extreme mean reversions.
+   - **Confidence Calibration & Confluence Attribution**: Calibrated FRVP base confidence to 82–84% (85% on Dalton 80% setups) while dynamic volume surge scales Bollinger and Keltner Breakouts to 88%. Multi-strategy confluence awards a +2% confidence boost per additional independent signal family, and scanner tags the trade with composite strategy attribution (e.g. `bollinger_breakout + fixed_range_volume_profile`).
 
 ### 6.3 Active Alpha Strategies vs Pruned Strategies
 Based on walk-forward backtest analysis under Indian statutory friction:

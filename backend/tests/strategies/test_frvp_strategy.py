@@ -340,3 +340,137 @@ def test_pullback_limit_entry_with_poc():
 
     assert entry_price < 515.0
     assert entry_price >= 500.0
+
+
+def test_frvp_dalton_80_rule_short():
+    """Verify Jim Dalton's 80% Rule Bearish Re-entry setup targeting prior POC and VAL."""
+    # Build Day 1 (yesterday): Value Area around 100.0 (VAH ~103, VAL ~97, POC ~100)
+    day1_times = pd.date_range("2026-09-22 09:15", "2026-09-22 15:30", freq="5min")
+    n1 = len(day1_times)
+    d1_closes = [100.0 + (i % 5) * 1.0 - 2.0 for i in range(n1)]
+    d1_df = pd.DataFrame({
+        "datetime": day1_times,
+        "open": d1_closes,
+        "high": [c + 1.0 for c in d1_closes],
+        "low": [c - 1.0 for c in d1_closes],
+        "close": d1_closes,
+        "volume": [2000.0] * n1,
+    })
+
+    # Day 2 (today): Opens above pdVAH (~104.0), then accepts back inside pdVAH with 2 closes
+    day2_times = pd.date_range("2026-09-23 09:15", periods=6, freq="5min")
+    # bar 0: opens high outside pdVAH (106.0)
+    # bar 1: drops to 104.0
+    # bar 2: close inside pdVAH (101.5 < pdVAH)
+    # bar 3: close inside pdVAH (101.0 < pdVAH, > pdPOC ~100)
+    d2_closes = [106.0, 104.5, 101.8, 101.2, 101.0, 100.8]
+    d2_df = pd.DataFrame({
+        "datetime": day2_times,
+        "open": [106.5, 105.0, 103.0, 102.0, 101.5, 101.0],
+        "high": [107.0, 105.5, 103.5, 102.5, 101.8, 101.2],
+        "low": [105.5, 103.5, 101.5, 101.0, 100.8, 100.5],
+        "close": d2_closes,
+        "volume": [3000.0] * len(day2_times),
+    })
+
+    full_df = pd.concat([d1_df, d2_df], ignore_index=True)
+    strat = FixedRangeVolumeProfileStrategy()
+    strat._get_bar_time = lambda d, i=-1: datetime.time(10, 0)
+    signals = strat.calculate_signals(full_df, "TCS")
+
+    dalton_signals = [s for s in signals if s.get("indicators", {}).get("setup") == "DALTON_80_RULE_SHORT"]
+    assert len(dalton_signals) >= 1
+    sig = dalton_signals[0]
+    assert sig["direction"] == "SELL"
+    assert sig["target"] <= sig["entryPrice"]
+    assert sig["stopLoss"] > sig["entryPrice"]
+    assert sig["indicators"]["is_structural_target"] is True
+
+
+def test_frvp_dalton_80_rule_long():
+    """Verify Jim Dalton's 80% Rule Bullish Re-entry setup targeting prior POC and VAH."""
+    day1_times = pd.date_range("2026-09-22 09:15", "2026-09-22 15:30", freq="5min")
+    n1 = len(day1_times)
+    d1_closes = [200.0 + (i % 5) * 1.5 - 3.0 for i in range(n1)]
+    d1_df = pd.DataFrame({
+        "datetime": day1_times,
+        "open": d1_closes,
+        "high": [c + 1.2 for c in d1_closes],
+        "low": [c - 1.2 for c in d1_closes],
+        "close": d1_closes,
+        "volume": [2000.0] * n1,
+    })
+
+    # Day 2: Opens below pdVAL (~196.0), then accepts back inside pdVAL with 2 closes
+    day2_times = pd.date_range("2026-09-23 09:15", periods=5, freq="5min")
+    d2_closes = [193.0, 194.0, 195.0, 197.0, 197.4]
+    d2_df = pd.DataFrame({
+        "datetime": day2_times,
+        "open": [192.5, 193.5, 194.5, 195.5, 197.0],
+        "high": [193.5, 194.5, 195.5, 197.2, 197.8],
+        "low": [192.0, 193.0, 194.0, 195.0, 196.8],
+        "close": d2_closes,
+        "volume": [3000.0] * len(day2_times),
+    })
+
+    full_df = pd.concat([d1_df, d2_df], ignore_index=True)
+    strat = FixedRangeVolumeProfileStrategy()
+    strat._get_bar_time = lambda d, i=-1: datetime.time(10, 0)
+    signals = strat.calculate_signals(full_df, "INFY")
+
+    dalton_signals = [s for s in signals if s.get("indicators", {}).get("setup") == "DALTON_80_RULE_LONG"]
+    assert len(dalton_signals) >= 1
+    sig = dalton_signals[0]
+    assert sig["direction"] == "BUY"
+    assert sig["target"] >= sig["entryPrice"]
+    assert sig["stopLoss"] < sig["entryPrice"]
+    assert sig["indicators"]["is_structural_target"] is True
+
+
+def test_frvp_virgin_poc_overhead_resistance_filter():
+    """Verify that a VAH breakout running directly into prior day virgin POC is blocked."""
+    # Build prior day where POC is at 111.0 (virgin, untested today)
+    day1_times = pd.date_range("2026-09-22 09:15", "2026-09-22 15:30", freq="5min")
+    n1 = len(day1_times)
+    d1_df = pd.DataFrame({
+        "datetime": day1_times,
+        "open": [108.0] * n1,
+        "high": [112.0] * n1,
+        "low": [107.0] * n1,
+        "close": [111.0] * n1,
+        "volume": [50000.0] * n1,  # Heavy volume cluster at 111.0
+    })
+
+    # Today: VAH breakout candidate closes at 110.8 (within 0.5% below virgin POC 111.0)
+    n = 35
+    day2_times = pd.date_range("2026-09-23 09:15", periods=n+3, freq="5min")
+    closes = [100.0 + (i % 6) * 1.0 for i in range(n)]
+    highs = [c + 0.5 for c in closes]
+    lows = [c - 0.5 for c in closes]
+    opens = closes.copy()
+    volumes = [1000.0] * n
+
+    # t-2
+    opens.append(104.0); highs.append(105.0); lows.append(103.5); closes.append(104.0); volumes.append(1000.0)
+    # t-1
+    opens.append(104.5); highs.append(108.5); lows.append(104.0); closes.append(108.0); volumes.append(2500.0)
+    # t: breakout candle closes at 110.8, right into virgin POC 111.0
+    opens.append(108.0); highs.append(111.0); lows.append(107.8); closes.append(110.8); volumes.append(4000.0)
+
+    d2_df = pd.DataFrame({
+        "datetime": day2_times,
+        "open": opens,
+        "high": highs,
+        "low": lows,
+        "close": closes,
+        "volume": volumes,
+    })
+
+    full_df = pd.concat([d1_df, d2_df], ignore_index=True)
+    strat = FixedRangeVolumeProfileStrategy()
+    strat._get_bar_time = lambda d, i=-1: datetime.time(10, 15)
+
+    signals = strat.calculate_signals(full_df, "RELIANCE")
+    breakouts = [s for s in signals if s.get("indicators", {}).get("setup") == "VAH_BREAKOUT"]
+    # Must be blocked by vPOC overhead resistance filter!
+    assert len(breakouts) == 0
