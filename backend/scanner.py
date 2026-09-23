@@ -368,12 +368,15 @@ class Scanner:
         from .config import config_manager as _cfg_mgr
         risk_cfg = _cfg_mgr.get_risk_config()
         micro_metrics: Dict[str, Any] = {}
+        strat_id = best.get("_strategy_id", "")
+        family = _get_strategy_family(strat_id)
         if risk_cfg.get("microstructureFilterEnabled", True) and df is not None and len(df) >= 5:
             from .microstructure import evaluate_microstructure_quality
             min_rvol = float(risk_cfg.get("microstructureMinRvol", 1.2))
             min_ker = float(risk_cfg.get("microstructureMinKer", 0.30))
             max_wick = float(risk_cfg.get("microstructureMaxWick", 0.25))
             midday_boost = 2.2 if risk_cfg.get("microstructureMiddayGuard", True) else min_rvol
+            max_gap = float(risk_cfg.get("maxExhaustionGapPct", 1.8))
 
             passed_micro, micro_reason, micro_metrics = evaluate_microstructure_quality(
                 df=df,
@@ -382,6 +385,8 @@ class Scanner:
                 min_ker=min_ker,
                 max_wick_ratio=max_wick,
                 midday_rvol_boost=midday_boost,
+                max_exhaustion_gap_pct=max_gap,
+                strategy_family=family,
             )
             if not passed_micro:
                 logger.info(
@@ -396,6 +401,8 @@ class Scanner:
         entry_p = float(best.get("entryPrice", best.get("price", 0.0)))
         sl_p = float(best.get("stopLoss", best.get("sl", 0.0)))
         raw_target = float(best.get("target", 0.0))
+        indicators = best.get("indicators", {})
+        is_structural_target = bool(indicators.get("is_structural_target", False))
 
         is_pullback = False
         if df is not None and len(df) >= 5:
@@ -437,19 +444,78 @@ class Scanner:
             else:
                 safe_risk = raw_risk
 
-            # Calculate raw RR and enforce at least min_rr (1:2 default)
-            raw_reward = abs(raw_target - entry_p) if raw_target > 0 else 0.0
-            raw_rr = (raw_reward / safe_risk) if safe_risk > 0 else 0.0
-            target_multiplier = max(min_rr, 2.0, raw_rr)
+            if is_structural_target and raw_target > 0:
+                # Structural Target (Mean Reversion strictly to POC, Pivot, or Fair Value):
+                # Never overwrite with a synthetic trend target!
+                structural_reward = abs(raw_target - entry_p)
+                structural_rr = (structural_reward / safe_risk) if safe_risk > 0 else 0.0
 
-            if direction == "BUY":
-                best["stopLoss"] = round(entry_p - safe_risk, 2)
-                best["target"] = round(entry_p + safe_risk * target_multiplier, 2)
+                if structural_rr < 1.3:
+                    logger.info(
+                        "Signal for %s rejected: Insufficient structural RR (%.2f < 1.3)",
+                        best.get("tradingsymbol", "UNKNOWN"),
+                        structural_rr,
+                    )
+                    return None
+
+                best["stopLoss"] = (
+                    round(entry_p - safe_risk, 2)
+                    if direction == "BUY"
+                    else round(entry_p + safe_risk, 2)
+                )
+                best["target"] = round(raw_target, 2)
+                best["riskReward"] = round(structural_rr, 2)
             else:
-                best["stopLoss"] = round(entry_p + safe_risk, 2)
-                best["target"] = round(entry_p - safe_risk * target_multiplier, 2)
+                # Directional / Breakout / Trend Continuation:
+                # Enforce realistic intraday target expansion (eliminates impossible 8% targets)
+                # 1. Cap target distance from entry: max 3.2% (or 1.8x ATR)
+                atr_val = float(indicators.get("atr", 0.0))
+                max_target_pct = float(risk_cfg.get("maxIntradayTargetPercent", 3.2))
+                max_target_dist = entry_p * (max_target_pct / 100.0)
+                if atr_val > 0:
+                    max_target_dist = min(max_target_dist, 1.8 * atr_val)
 
-            best["riskReward"] = round(target_multiplier, 2)
+                # 2. Cap total day expansion from day open: max 4.5% total move
+                max_day_expansion_pct = float(risk_cfg.get("maxDayExpansionPercent", 4.5))
+                today_open = float(micro_metrics.get("today_open", 0.0)) if micro_metrics else 0.0
+                if today_open <= 0 and df is not None and len(df) > 0:
+                    today_open = float(df["open"].iloc[0])
+
+                target_dist = safe_risk * 2.0  # Exact 1:2 R:R geometry baseline
+
+                if max_target_dist > 0:
+                    target_dist = min(target_dist, max_target_dist)
+
+                if today_open > 0 and max_day_expansion_pct > 0:
+                    if direction == "BUY":
+                        max_day_target = today_open * (1.0 + max_day_expansion_pct / 100.0)
+                        if entry_p + target_dist > max_day_target:
+                            target_dist = max(0.0, max_day_target - entry_p)
+                    else:
+                        min_day_target = today_open * (1.0 - max_day_expansion_pct / 100.0)
+                        if entry_p - target_dist < min_day_target:
+                            target_dist = max(0.0, entry_p - min_day_target)
+
+                # Check if remaining intraday runway supports at least min_rr
+                effective_rr = (target_dist / safe_risk) if safe_risk > 0 else 0.0
+                if effective_rr < min_rr:
+                    logger.info(
+                        "Signal for %s rejected by Intraday Expansion Guard: Realistic target yields RR=%.2f < %.2f (day runway exhausted)",
+                        best.get("tradingsymbol", "UNKNOWN"),
+                        effective_rr,
+                        min_rr,
+                    )
+                    return None
+
+                if direction == "BUY":
+                    best["stopLoss"] = round(entry_p - safe_risk, 2)
+                    best["target"] = round(entry_p + target_dist, 2)
+                else:
+                    best["stopLoss"] = round(entry_p + safe_risk, 2)
+                    best["target"] = round(entry_p - target_dist, 2)
+
+                best["riskReward"] = round(effective_rr, 2)
+
             best["stopLossPercent"] = round((safe_risk / entry_p) * 100.0, 2)
             best["targetPercent"] = round(
                 (abs(best["target"] - entry_p) / entry_p) * 100.0, 2

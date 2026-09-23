@@ -278,10 +278,20 @@ Every candidate signal must clear the following sequentially:
    - **Rejection Wick Cap**: Adverse rejection wick $\le 25\%$ of total candle range (rejects buying into institutional ceiling supply or selling into floor demand).
    - **Local Kaufman Efficiency (KER)**: 20-bar local $\text{KER} \ge 0.30$ (rejects micro-choppy consolidations).
    - **Midday Lull Protection**: Between 11:30 and 13:15 IST, requires high institutional conviction ($\text{RVOL} \ge 2.2\times$), guarding against low-liquidity midday stop-hunts.
+   - **Opening Gap Exhaustion Guard**: If opening gap $\ge 1.8\%$ (or $\le -1.8\%$), blocks breakout/trend chasing in the gap direction because the day's expansion runway is already exhausted at market open.
    - *Triad Synchronization*: Enforced symmetrically across Live Scanner (`backend/scanner.py`), Paper Trading Sandbox (`src/renderer/stores/paper-trading-store.ts`), and Walk-Forward Backtester (`backend/backtest/engine.py`). Eliminates the need for brittle static stock blacklists.
 5. **Market Regime Gate**: `is_trade_allowed_by_regime()` verifies current symbol regime. In `CHOPPY_RANGE`, all Breakout and Trend continuation setups are strictly inhibited.
-6. **Stop-Loss Floor & Cap**: Enforces a minimum $1.0\%$ stop-loss width to prevent noise stop-outs, and a maximum $1.8\%$ stop-loss cap to prevent outsized tail-risk losses.
-7. **1:2 R:R Geometry Target**: Targets are recalculated to guarantee at least $1:2$ Risk-to-Reward ratio against the calibrated SL buffer.
+6. **Stop-Loss Floor & Cap**: Enforces a minimum $1.2\%$ stop-loss width to prevent noise stop-outs, and a maximum $2.4\%$ stop-loss cap to prevent outsized tail-risk losses.
+7. **Realistic Target Architecture & Structural Preservation**:
+   - **Structural Target Preservation**: Mean-reversion setups (e.g. FRVP Setups 3 & 4 targeting POC, pivots, fair value) strictly preserve their structural targets and are never overwritten with synthetic trend expansion targets.
+   - **Intraday Expansion Clamping**: For breakout/trend trades, targets are capped at $\le 3.2\%$ from entry (or $1.8\times \text{ATR}$) and total day expansion is capped at $\le 4.5\%$ from day open. If remaining runway yields $\text{R:R} < 1.8$, the trade is dropped rather than setting unrealistic 7–8% targets.
+8. **High-Conviction FRVP Strategy ([backend/strategies/fixed_range_volume_profile.py](file:///home/gokul/Desktop/angelone-agenti/backend/strategies/fixed_range_volume_profile.py))**:
+   - **Session-Anchored Profile**: Anchored from 09:15 IST session open (fallback: 80 bars rolling, 30 bins).
+   - **Compression Guard**: Suppresses breakouts if $\text{VA\_Width} = (\text{VAH} - \text{VAL}) / \text{ATR} < 1.8$.
+   - **LVN Vacuum Filter**: Breakout requires adjacent target bins outside value area to have $< 40\%$ of POC volume (avoids overhead HVNs).
+   - **2-Bar Acceptance**: Requires 2 consecutive bar closes outside VAH/VAL with initiative candle quality and volume expansion $\ge 1.25\times$.
+   - **Strict POC Target for Rejections**: VAL/VAH liquidity sweeps target strictly the Point of Control with $\text{R:R} \ge 1.3$.
+   - **Midday Lull**: Suppresses breakouts between 11:30 and 13:30 IST; permits only extreme mean reversions.
 
 ### 6.3 Active Alpha Strategies vs Pruned Strategies
 Based on walk-forward backtest analysis under Indian statutory friction:

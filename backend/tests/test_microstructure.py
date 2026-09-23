@@ -128,3 +128,109 @@ def test_microstructure_midday_lull_guard():
     )
     assert passed_surge is True
     assert metrics_surge["is_midday"] is True
+
+
+def test_microstructure_opening_gap_exhaustion_buy():
+    """Verify that a stock opening with >= 1.8% gap-up (exhaustion gap) is blocked for BUY breakouts."""
+    from backend.microstructure import calculate_opening_gap
+    # 2 days of 5m data
+    d1 = pd.date_range("2026-09-17 15:00:00", periods=5, freq="5min")
+    d2 = pd.date_range("2026-09-18 09:15:00", periods=10, freq="5min")
+
+    df1 = pd.DataFrame({
+        "open": [100.0] * 5,
+        "high": [100.5] * 5,
+        "low": [99.5] * 5,
+        "close": [100.0] * 5,  # Prev close = 100.0
+        "volume": [1000.0] * 5,
+    }, index=d1)
+
+    df2 = pd.DataFrame({
+        "open": [102.5] + [102.8] * 9,  # Today open = 102.5 (+2.5% gap)
+        "high": [103.5] * 10,
+        "low": [102.0] * 10,
+        "close": [103.0] * 10,
+        "volume": [5000.0] * 10,
+    }, index=d2)
+
+    df = pd.concat([df1, df2])
+    gap_pct, today_open, prev_close = calculate_opening_gap(df)
+    assert gap_pct == 2.5
+    assert today_open == 102.5
+    assert prev_close == 100.0
+
+    passed, reason, metrics = evaluate_microstructure_quality(
+        df,
+        direction="BUY",
+        max_exhaustion_gap_pct=1.8,
+        strategy_family="breakout",
+        current_time=datetime.datetime(2026, 9, 18, 10, 0),
+    )
+    assert passed is False
+    assert "Opening exhaustion gap-up" in reason
+
+
+def test_microstructure_opening_gap_exhaustion_sell():
+    """Verify that a stock opening with <= -1.8% gap-down is blocked for SELL breakdowns."""
+    d1 = pd.date_range("2026-09-17 15:00:00", periods=5, freq="5min")
+    d2 = pd.date_range("2026-09-18 09:15:00", periods=10, freq="5min")
+
+    df1 = pd.DataFrame({
+        "open": [200.0] * 5,
+        "high": [200.5] * 5,
+        "low": [199.5] * 5,
+        "close": [200.0] * 5,  # Prev close = 200.0
+        "volume": [1000.0] * 5,
+    }, index=d1)
+
+    df2 = pd.DataFrame({
+        "open": [195.0] + [195.2] * 9,  # Today open = 195.0 (-2.5% gap)
+        "high": [196.0] * 10,
+        "low": [194.0] * 10,
+        "close": [194.5] * 10,
+        "volume": [5000.0] * 10,
+    }, index=d2)
+
+    df = pd.concat([df1, df2])
+    passed, reason, metrics = evaluate_microstructure_quality(
+        df,
+        direction="SELL",
+        max_exhaustion_gap_pct=1.8,
+        strategy_family="breakout",
+        current_time=datetime.datetime(2026, 9, 18, 10, 0),
+    )
+    assert passed is False
+    assert "Opening exhaustion gap-down" in reason
+
+
+def test_microstructure_normal_gap_passes():
+    """Verify that moderate healthy gaps (< 1.8%) pass the exhaustion filter."""
+    d1 = pd.date_range("2026-09-17 15:00:00", periods=5, freq="5min")
+    d2 = pd.date_range("2026-09-18 09:15:00", periods=10, freq="5min")
+
+    df1 = pd.DataFrame({
+        "open": [100.0] * 5,
+        "high": [100.5] * 5,
+        "low": [99.5] * 5,
+        "close": [100.0] * 5,
+        "volume": [1000.0] * 5,
+    }, index=d1)
+
+    df2 = pd.DataFrame({
+        "open": [100.8] + [101.0] * 8 + [101.0],  # 0.8% healthy gap
+        "high": [101.5] * 10,
+        "low": [100.5] * 10,
+        "close": [101.2] * 9 + [101.4],  # clean close near high on trigger bar
+        "volume": [5000.0] * 10,
+    }, index=d2)
+
+    df = pd.concat([df1, df2])
+    passed, reason, metrics = evaluate_microstructure_quality(
+        df,
+        direction="BUY",
+        max_exhaustion_gap_pct=1.8,
+        strategy_family="breakout",
+        current_time=datetime.datetime(2026, 9, 18, 10, 0),
+    )
+    assert passed is True
+

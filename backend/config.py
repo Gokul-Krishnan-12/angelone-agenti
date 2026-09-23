@@ -57,12 +57,15 @@ class ConfigManager:
                 "scaleInEnabled": False,  # 50% qty at breakout, 50% on EMA20/VWAP pullback → improves avg entry
                 "scaleInLeg1Ratio": 0.5,  # fraction of calculated qty placed as Leg 1
                 "scaleInLeg2TimeoutMultiplier": 2,  # Leg 2 waits 2× pendingOrderTimeoutSeconds before being skipped
-                # ── Dynamic Microstructural Quality Gate ────────
+                # ── Dynamic Microstructural & Realistic Target Gate ──
                 "microstructureFilterEnabled": True,  # dynamic false-breakout rejection gate
                 "microstructureMinRvol": 1.2,  # trigger bar volume >= 1.2x 20-period MA
                 "microstructureMaxWick": 0.25,  # rejection wick <= 25% of candle range
                 "microstructureMinKer": 0.30,  # 20-period local KER >= 0.30 (blocks chop traps)
                 "microstructureMiddayGuard": True,  # enforces RVOL >= 2.2x during 11:30 - 13:15 IST
+                "maxExhaustionGapPct": 1.8,  # blocks breakout/trend chasing on opening gaps >= 1.8%
+                "maxIntradayTargetPercent": 3.2,  # caps intraday target at 3.2% from entry (or 1.8x ATR)
+                "maxDayExpansionPercent": 4.5,  # caps total intraday expansion at 4.5% from day open
             },
             "strategies": {
                 # ── Primary alpha strategies: proven net-positive across realistic backtests ──────

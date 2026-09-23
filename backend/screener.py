@@ -424,8 +424,17 @@ class DynamicScreener:
                 day_range = max(0.0, high_price - low_price)
                 range_pct = (day_range / prev_close * 100.0) if prev_close > 0 else 0.0
 
+                # Healthy opening gaps (< 1.8%) contribute moderate momentum,
+                # but large exhaustion gaps (>= 1.8%) are penalized because intraday expansion
+                # is already spent at market open.
+                if gap_pct < 1.8:
+                    gap_contribution = gap_pct * 0.6
+                else:
+                    # Exhaustion penalty for large gaps
+                    gap_contribution = max(-2.0, 1.0 - (gap_pct - 1.8) * 1.5)
+
                 raw_momentum = (
-                    (change_pct * 1.5) + (open_to_ltp_pct * 2.0) + (gap_pct * 0.6)
+                    (change_pct * 1.5) + (open_to_ltp_pct * 2.0) + gap_contribution
                 )
 
                 # RVOL multiplier: boosts momentum if active volume, dampens if low liquidity

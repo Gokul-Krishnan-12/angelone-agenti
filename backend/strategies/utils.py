@@ -120,26 +120,70 @@ def compute_vwap_bands(df: pd.DataFrame) -> dict:
 
 
 def compute_volume_profile(
-    df: pd.DataFrame, n_bars: int = 50, n_bins: int = 20
+    df: pd.DataFrame, n_bars: int = 80, n_bins: int = 30, anchor_session: bool = True
 ) -> dict:
     """
-    Compute a simplified volume profile over the last `n_bars` candles.
+    Compute volume profile and Value Area (POC, VAH, VAL, and bin distributions).
 
-    Returns the Point of Control (POC — the price level with the highest
-    accumulated volume) and the value area (price band containing ~68% of volume).
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV candles.
+    n_bars : int
+        Lookback window if session anchoring is unavailable (default: 80).
+    n_bins : int
+        Granularity of price bins across the profile (default: 30).
+    anchor_session : bool
+        If True and session timestamps are detected, anchors profile from
+        session open (09:15 IST) of current day.
 
     Returns
     -------
-    dict with keys: poc, value_area_low, value_area_high
+    dict with keys: poc, value_area_low, value_area_high, vol_profile,
+                    bin_size, price_min, price_max, n_bins, poc_bin,
+                    poc_volume, vah_bin, val_bin
     """
     if len(df) < 5:
+        c = float(df["close"].iloc[-1])
+        l = float(df["low"].iloc[-1])
+        h = float(df["high"].iloc[-1])
         return {
-            "poc": float(df["close"].iloc[-1]),
-            "value_area_low": float(df["low"].iloc[-1]),
-            "value_area_high": float(df["high"].iloc[-1]),
+            "poc": c,
+            "value_area_low": l,
+            "value_area_high": h,
+            "vol_profile": [0.0] * n_bins,
+            "bin_size": max(0.01, (h - l) / n_bins),
+            "price_min": l,
+            "price_max": h,
+            "n_bins": n_bins,
+            "poc_bin": 0,
+            "poc_volume": 0.0,
+            "vah_bin": n_bins - 1,
+            "val_bin": 0,
         }
 
-    subset = df.tail(min(n_bars, len(df))).copy()
+    # Module A: Anchored session detection (09:15 IST) vs. rolling fallback
+    subset = None
+    if anchor_session:
+        # Check datetime column or index
+        dt_series = None
+        if "datetime" in df.columns:
+            dt_series = pd.to_datetime(df["datetime"])
+        elif "timestamp" in df.columns:
+            dt_series = pd.to_datetime(df["timestamp"])
+        elif isinstance(df.index, pd.DatetimeIndex):
+            dt_series = pd.Series(df.index)
+
+        if dt_series is not None and len(dt_series) > 0:
+            last_date = dt_series.iloc[-1].date()
+            same_day_mask = dt_series.apply(lambda x: x.date() == last_date)
+            session_bars = df.loc[same_day_mask]
+            if len(session_bars) >= 5:
+                subset = session_bars.copy()
+
+    if subset is None:
+        subset = df.tail(min(n_bars, len(df))).copy()
+
     price_min = float(subset["low"].min())
     price_max = float(subset["high"].max())
 
@@ -149,17 +193,28 @@ def compute_volume_profile(
             "poc": round(mid, 2),
             "value_area_low": round(price_min, 2),
             "value_area_high": round(price_max, 2),
+            "vol_profile": [0.0] * n_bins,
+            "bin_size": 0.01,
+            "price_min": price_min,
+            "price_max": price_max,
+            "n_bins": n_bins,
+            "poc_bin": 0,
+            "poc_volume": 0.0,
+            "vah_bin": n_bins - 1,
+            "val_bin": 0,
         }
 
     bin_size = (price_max - price_min) / n_bins
     vol_profile = [0.0] * n_bins
 
     for _, row in subset.iterrows():
-        tp = (row["high"] + row["low"] + row["close"]) / 3.0
+        tp = (float(row["high"]) + float(row["low"]) + float(row["close"])) / 3.0
         bin_idx = min(int((tp - price_min) / bin_size), n_bins - 1)
-        vol_profile[bin_idx] += float(row["volume"])
+        bin_idx = max(0, bin_idx)
+        vol_profile[bin_idx] += float(row.get("volume", 1.0))
 
-    poc_bin = vol_profile.index(max(vol_profile))
+    poc_vol = max(vol_profile)
+    poc_bin = vol_profile.index(poc_vol) if poc_vol > 0 else 0
     poc = price_min + (poc_bin + 0.5) * bin_size
 
     # Value area: price bins covering ~68% of total volume
@@ -169,19 +224,102 @@ def compute_volume_profile(
     va_bins = []
     sorted_bins = sorted(range(n_bins), key=lambda x: vol_profile[x], reverse=True)
     for b in sorted_bins:
-        if cumulative >= target_vol:
+        if cumulative >= target_vol and len(va_bins) > 0:
             break
         va_bins.append(b)
         cumulative += vol_profile[b]
 
-    va_low = price_min + min(va_bins) * bin_size if va_bins else price_min
-    va_high = price_min + (max(va_bins) + 1) * bin_size if va_bins else price_max
+    min_va_bin = min(va_bins) if va_bins else 0
+    max_va_bin = max(va_bins) if va_bins else n_bins - 1
+
+    va_low = price_min + min_va_bin * bin_size
+    va_high = price_min + (max_va_bin + 1) * bin_size
 
     return {
         "poc": round(poc, 2),
         "value_area_low": round(va_low, 2),
         "value_area_high": round(va_high, 2),
+        "vol_profile": vol_profile,
+        "bin_size": bin_size,
+        "price_min": price_min,
+        "price_max": price_max,
+        "n_bins": n_bins,
+        "poc_bin": poc_bin,
+        "poc_volume": poc_vol,
+        "vah_bin": max_va_bin,
+        "val_bin": min_va_bin,
     }
+
+
+def is_lvn_vacuum(profile: dict, direction: str) -> bool:
+    """
+    Check if adjacent price bins beyond the Value Area boundary are Low Volume Nodes (LVNs).
+
+    For VAH breakouts: inspect 2 bins immediately above VAH (vah_bin + 1, vah_bin + 2).
+    For VAL breakdowns: inspect 2 bins immediately below VAL (val_bin - 1, val_bin - 2).
+
+    Condition: Volume in adjacent bins must be < 40% of the POC volume.
+    Entering directly into an overhead/underlying dense High Volume Node (HVN) is prohibited.
+    """
+    poc_vol = profile.get("poc_volume", 0.0)
+    if poc_vol <= 0:
+        return True
+
+    vol_profile = profile.get("vol_profile", [])
+    n_bins = profile.get("n_bins", len(vol_profile))
+    threshold = 0.40 * poc_vol
+
+    if direction == "BUY":
+        vah_bin = profile.get("vah_bin", n_bins - 1)
+        # Check up to 2 adjacent bins above VAH
+        adjacent_bins = [vah_bin + 1, vah_bin + 2]
+        checked = 0
+        for b in adjacent_bins:
+            if 0 <= b < n_bins:
+                checked += 1
+                if vol_profile[b] >= threshold:
+                    return False  # Dense HVN absorption ahead
+        return True
+    else:
+        val_bin = profile.get("val_bin", 0)
+        # Check up to 2 adjacent bins below VAL
+        adjacent_bins = [val_bin - 1, val_bin - 2]
+        checked = 0
+        for b in adjacent_bins:
+            if 0 <= b < n_bins:
+                checked += 1
+                if vol_profile[b] >= threshold:
+                    return False  # Dense HVN absorption below
+        return True
+
+
+def is_initiative_candle(candle: pd.Series | dict, direction: str) -> bool:
+    """
+    Validate initiative bar quality for structural auction breakouts.
+
+    Criteria:
+    - Body ratio: |close - open| / range >= 0.50
+    - Close location:
+        BUY:  (close - low) / range >= 0.75 (closes in upper 25%)
+        SELL: (high - close) / range >= 0.75 (closes in lower 25%)
+    """
+    high = float(candle["high"])
+    low = float(candle["low"])
+    open_p = float(candle["open"])
+    close_p = float(candle["close"])
+
+    candle_range = max(0.001, high - low)
+    body_ratio = abs(close_p - open_p) / candle_range
+
+    if body_ratio < 0.50:
+        return False
+
+    if direction == "BUY":
+        close_loc = (close_p - low) / candle_range
+        return close_loc >= 0.75
+    else:
+        close_loc = (high - close_p) / candle_range
+        return close_loc >= 0.75
 
 
 # ─── Relative Volume ───────────────────────────────────────────────────────────
