@@ -140,9 +140,8 @@ const PaperTrade: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-bold text-white tracking-tight">Paper Trading Sandbox</h1>
-                <span className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                  isRunning ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-surface-800 text-surface-400 border border-surface-700'
-                }`}>
+                <span className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${isRunning ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-surface-800 text-surface-400 border border-surface-700'
+                  }`}>
                   <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-profit-light animate-ping' : 'bg-surface-500'}`} />
                   {isRunning ? 'SIMULATION RUNNING' : 'SIMULATION IDLE'}
                 </span>
@@ -154,20 +153,19 @@ const PaperTrade: React.FC = () => {
           </div>
         </div>
 
-        {/* Top Controls */}
-        <div className="flex items-center gap-2.5 flex-wrap">
+        {/* Top Controls - Single Line */}
+        <div className="flex items-center gap-2 shrink-0 flex-nowrap">
           {/* Entry Mode Toggle Button */}
           <button
             onClick={() => setPullbackEntryEnabled(!pullbackEntryEnabled)}
-            className={`flex items-center gap-1.5 px-3.5 py-2 border rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
-              pullbackEntryEnabled
-                ? 'bg-accent/20 hover:bg-accent/30 text-accent-light border-accent/40'
-                : 'bg-surface-800 hover:bg-surface-750 text-profit-light border-profit/30'
-            }`}
+            className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer shrink-0 whitespace-nowrap ${pullbackEntryEnabled
+              ? 'bg-accent/20 hover:bg-accent/30 text-accent-light border-accent/40'
+              : 'bg-surface-800 hover:bg-surface-750 text-profit-light border-profit/30'
+              }`}
             title={pullbackEntryEnabled ? 'Pullback Retest Active: Waiting for EMA20/VWAP/POC retest before entering' : 'Direct Breakout Entry Active: Entering immediately at market price'}
           >
             {pullbackEntryEnabled ? <Target size={14} className="text-accent-light" /> : <Zap size={14} className="text-profit-light" />}
-            <span>Entry: {pullbackEntryEnabled ? '🎯 Pullback Retest' : '⚡ Direct Breakout'}</span>
+            <span>{pullbackEntryEnabled ? 'Pullback' : 'Direct'}</span>
           </button>
 
           {/* Timeframe Toggle Button */}
@@ -189,51 +187,49 @@ const PaperTrade: React.FC = () => {
                 risk: { ...useTradingStore.getState().settings?.risk, candleInterval: next }
               });
             }}
-            className={`flex items-center gap-1.5 px-3.5 py-2 border rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
-              candleInterval === '15minute'
-                ? 'bg-profit-dark/20 hover:bg-profit-dark/30 text-profit-light border-profit/40'
-                : 'bg-surface-800 hover:bg-surface-750 text-accent-light border-accent/30'
-            }`}
+            className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer shrink-0 whitespace-nowrap ${candleInterval === '15minute'
+              ? 'bg-profit-dark/20 hover:bg-profit-dark/30 text-profit-light border-profit/40'
+              : 'bg-surface-800 hover:bg-surface-750 text-accent-light border-accent/30'
+              }`}
             title="Toggle between 5-Minute and 15-Minute Candle Execution Timeframe"
           >
             <Clock size={14} className={candleInterval === '15minute' ? 'text-profit-light' : 'text-accent-light'} />
-            <span>Timeframe: {candleInterval === '15minute' ? '⏱️ 15 Min' : '⚡ 5 Min'}</span>
+            <span>{candleInterval === '15minute' ? '15 Min' : '5 Min'}</span>
           </button>
 
           <button
             onClick={() => setShowBalanceModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-surface-800 hover:bg-surface-750 text-surface-200 hover:text-white border border-surface-700 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 bg-surface-800 hover:bg-surface-750 text-surface-200 hover:text-white border border-surface-700 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer shrink-0 whitespace-nowrap"
+            title="Configure simulated initial capital"
           >
             <Wallet size={14} className="text-accent-light" />
-            <span>Set Capital: ₹{initialCapital.toLocaleString('en-IN')}</span>
+            <span>₹{initialCapital.toLocaleString('en-IN')}</span>
           </button>
 
           <button
             onClick={() => resetAccount()}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-surface-800 hover:bg-surface-750 text-surface-400 hover:text-white border border-surface-700 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer"
+            className="flex items-center justify-center p-2 bg-surface-800 hover:bg-surface-750 text-surface-400 hover:text-white border border-surface-700 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer shrink-0"
             title="Reset simulated positions, orders, and restore starting balance"
           >
             <RotateCcw size={14} />
-            <span>Reset</span>
           </button>
 
           <button
             onClick={() => setIsRunning(!isRunning)}
-            className={`flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer ${
-              isRunning
-                ? 'bg-loss-dark/90 hover:bg-loss text-white border border-loss/40 shadow-loss/20'
-                : 'bg-profit-dark/90 hover:bg-profit text-white border border-profit/40 shadow-profit/20'
-            }`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer shrink-0 whitespace-nowrap ${isRunning
+              ? 'bg-loss-dark/90 hover:bg-loss text-white border border-loss/40 shadow-loss/20'
+              : 'bg-profit-dark/90 hover:bg-profit text-white border border-profit/40 shadow-profit/20'
+              }`}
           >
             {isRunning ? (
               <>
                 <Square size={13} fill="currentColor" />
-                <span>Stop Paper Trading</span>
+                <span>Stop</span>
               </>
             ) : (
               <>
                 <Play size={13} fill="currentColor" />
-                <span>Start Paper Trading</span>
+                <span>Start</span>
               </>
             )}
           </button>
@@ -266,14 +262,12 @@ const PaperTrade: React.FC = () => {
       {/* ─── TOP 4 METRIC CARDS ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Metric 1: Virtual P&L */}
-        <div className={`p-5 rounded-2xl border backdrop-blur-md bg-surface-800/90 shadow-lg ${
-          totalNetPnl >= 0 ? 'border-profit/30' : 'border-loss/30'
-        }`}>
+        <div className={`p-5 rounded-2xl border backdrop-blur-md bg-surface-800/90 shadow-lg ${totalNetPnl >= 0 ? 'border-profit/30' : 'border-loss/30'
+          }`}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-surface-400">Virtual Net P&L</span>
-            <span className={`flex items-center gap-1 text-xs font-mono font-bold px-2 py-0.5 rounded-full ${
-              totalNetPnl >= 0 ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-loss-dark/20 text-loss-light border border-loss/30'
-            }`}>
+            <span className={`flex items-center gap-1 text-xs font-mono font-bold px-2 py-0.5 rounded-full ${totalNetPnl >= 0 ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-loss-dark/20 text-loss-light border border-loss/30'
+              }`}>
               {totalReturnPct >= 0 ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
               <span>{totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%</span>
             </span>
@@ -311,9 +305,8 @@ const PaperTrade: React.FC = () => {
           <div>
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-surface-400">Strategy Hit Rate</span>
-              <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full border ${
-                winRate >= 50 ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-surface-700 text-surface-300'
-              }`}>
+              <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full border ${winRate >= 50 ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-surface-700 text-surface-300'
+                }`}>
                 {winRate.toFixed(1)}%
               </span>
             </div>
@@ -360,11 +353,10 @@ const PaperTrade: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setActiveTab('positions')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'positions'
-                  ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
-                  : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-              }`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === 'positions'
+                ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
+                : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+                }`}
             >
               <span>Active Virtual Positions</span>
               <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-surface-700 text-surface-200">
@@ -374,11 +366,10 @@ const PaperTrade: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('orders')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'orders'
-                  ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
-                  : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-              }`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === 'orders'
+                ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
+                : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+                }`}
             >
               <span>Simulated Trade History</span>
               <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-surface-700 text-surface-200">
@@ -388,11 +379,10 @@ const PaperTrade: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('calendar')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'calendar'
-                  ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
-                  : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-              }`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === 'calendar'
+                ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
+                : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+                }`}
             >
               <Calendar size={14} />
               <span>P&L Calendar</span>
@@ -403,28 +393,25 @@ const PaperTrade: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('rejected')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'rejected'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-                  : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-              }`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === 'rejected'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+                }`}
             >
               <ShieldAlert size={14} />
               <span>Rejected Setups</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                rejectedTrades.length > 0 ? 'bg-amber-500/30 text-amber-200' : 'bg-surface-700 text-surface-400'
-              }`}>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${rejectedTrades.length > 0 ? 'bg-amber-500/30 text-amber-200' : 'bg-surface-700 text-surface-400'
+                }`}>
                 {rejectedTrades.length}
               </span>
             </button>
 
             <button
               onClick={() => setActiveTab('logs')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'logs'
-                  ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
-                  : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
-              }`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === 'logs'
+                ? 'bg-accent/20 text-accent-light border border-accent/40 shadow-sm'
+                : 'text-surface-400 hover:text-white hover:bg-surface-700/50'
+                }`}
             >
               <span>Sandbox Activity Logs</span>
               <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-surface-700 text-surface-200">
@@ -500,9 +487,8 @@ const PaperTrade: React.FC = () => {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-white text-base">{p.tradingsymbol}</span>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              p.direction === 'BUY' ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-loss-dark/20 text-loss-light border border-loss/30'
-                            }`}>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${p.direction === 'BUY' ? 'bg-profit-dark/20 text-profit-light border border-profit/30' : 'bg-loss-dark/20 text-loss-light border border-loss/30'
+                              }`}>
                               {p.direction}
                             </span>
                             <span className="text-[10px] font-mono text-surface-400 bg-surface-800 px-1.5 py-0.5 rounded">
@@ -610,9 +596,8 @@ const PaperTrade: React.FC = () => {
                           </div>
                         </td>
                         <td className="px-5 py-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            isBuy ? 'bg-profit-dark/20 text-profit-light' : 'bg-loss-dark/20 text-loss-light'
-                          }`}>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isBuy ? 'bg-profit-dark/20 text-profit-light' : 'bg-loss-dark/20 text-loss-light'
+                            }`}>
                             {o.direction}
                           </span>
                         </td>
@@ -629,17 +614,16 @@ const PaperTrade: React.FC = () => {
                           {o.exitPrice ? `₹${o.exitPrice.toFixed(2)}` : '—'}
                         </td>
                         <td className="px-5 py-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            o.status === 'TARGET_HIT'
-                              ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
-                              : o.status === 'STOPLOSS_HIT'
-                                ? 'bg-loss-dark/20 text-loss-light border border-loss/30'
-                                : o.status === 'AUTO_SQUARE_OFF'
-                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                                  : o.status === 'OPEN'
-                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                    : 'bg-surface-700 text-surface-300'
-                          }`}>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${o.status === 'TARGET_HIT'
+                            ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
+                            : o.status === 'STOPLOSS_HIT'
+                              ? 'bg-loss-dark/20 text-loss-light border border-loss/30'
+                              : o.status === 'AUTO_SQUARE_OFF'
+                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                : o.status === 'OPEN'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                  : 'bg-surface-700 text-surface-300'
+                            }`}>
                             {o.status.replace(/_/g, ' ')}
                           </span>
                         </td>
@@ -711,11 +695,10 @@ const PaperTrade: React.FC = () => {
                         {r.tradingsymbol}
                       </td>
                       <td className="px-5 py-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          r.direction === 'BUY'
-                            ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
-                            : 'bg-loss-dark/20 text-loss-light border border-loss/30'
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.direction === 'BUY'
+                          ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
+                          : 'bg-loss-dark/20 text-loss-light border border-loss/30'
+                          }`}>
                           {r.direction}
                         </span>
                       </td>
@@ -758,23 +741,22 @@ const PaperTrade: React.FC = () => {
                   <span className="text-surface-500 text-[11px] shrink-0 pt-0.5">
                     {new Date(l.timestamp).toLocaleTimeString()}
                   </span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                    l.type === 'EXECUTE'
-                      ? 'bg-accent/20 text-accent-light'
-                      : l.type === 'TARGET'
-                        ? 'bg-profit-dark/20 text-profit-light'
-                        : l.type === 'STOPLOSS'
-                          ? 'bg-loss-dark/20 text-loss-light'
-                          : l.type === 'EXIT'
-                            ? 'bg-amber-500/20 text-amber-300'
-                            : l.type === 'SIGNAL'
-                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                              : l.type === 'ORDER'
-                                ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
-                                : l.type === 'ERROR' || l.type === 'WARN'
-                                  ? 'bg-loss-dark/20 text-loss-light border border-loss/30'
-                                  : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                  }`}>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${l.type === 'EXECUTE'
+                    ? 'bg-accent/20 text-accent-light'
+                    : l.type === 'TARGET'
+                      ? 'bg-profit-dark/20 text-profit-light'
+                      : l.type === 'STOPLOSS'
+                        ? 'bg-loss-dark/20 text-loss-light'
+                        : l.type === 'EXIT'
+                          ? 'bg-amber-500/20 text-amber-300'
+                          : l.type === 'SIGNAL'
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : l.type === 'ORDER'
+                              ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
+                              : l.type === 'ERROR' || l.type === 'WARN'
+                                ? 'bg-loss-dark/20 text-loss-light border border-loss/30'
+                                : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                    }`}>
                     {l.type}
                   </span>
                   <span className="text-surface-200 font-sans text-xs flex-1">{l.message}</span>
@@ -889,9 +871,9 @@ const PaperTrade: React.FC = () => {
                     <p className="text-[10px] text-surface-500">Choose between immediate breakout execution or conservative pullback retest.</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer" 
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
                       checked={pullbackEntryEnabled}
                       onChange={(e) => setPullbackEntryEnabled(e.target.checked)}
                     />
