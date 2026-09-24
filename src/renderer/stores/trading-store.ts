@@ -41,7 +41,7 @@ interface TradingState {
 export const useTradingStore = create<TradingState>()(
   persist(
     (set) => ({
-      auth: { isLoggedIn: false, credentials: null, loginUrl: null, error: null },
+      auth: { isLoggedIn: false, isCheckingAuth: true, credentials: null, loginUrl: null, error: null },
       positions: [],
       orders: [],
       holdings: [],
@@ -148,13 +148,18 @@ export const useTradingStore = create<TradingState>()(
         }
       }),
       onRehydrateStorage: () => (state) => {
-        if (state && Array.isArray(state.signals)) {
-          const now = Date.now();
-          state.signals = state.signals.filter((s) => {
-            if (!s.timestamp) return false;
-            const age = now - new Date(s.timestamp).getTime();
-            return age > 0 && age < 12 * 60 * 60 * 1000;
-          });
+        if (state) {
+          if (state.auth) {
+            state.auth.isCheckingAuth = true;
+          }
+          if (Array.isArray(state.signals)) {
+            const now = Date.now();
+            state.signals = state.signals.filter((s) => {
+              if (!s.timestamp) return false;
+              const age = now - new Date(s.timestamp).getTime();
+              return age > 0 && age < 12 * 60 * 60 * 1000;
+            });
+          }
         }
       }
     }

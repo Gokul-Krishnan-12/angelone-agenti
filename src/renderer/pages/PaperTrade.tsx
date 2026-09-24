@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { usePaperTradingStore, sanitizePaperOrder } from '../stores/paper-trading-store';
+import { useTradingStore } from '../stores/trading-store';
 import {
   Play,
   Square,
@@ -40,6 +41,7 @@ const PaperTrade: React.FC = () => {
   const candleInterval = rawInterval.includes('15') ? '15minute' : '5minute';
   const setMaxDailyTrades = usePaperTradingStore((s) => s.setMaxDailyTrades);
   const setRiskPerTrade = usePaperTradingStore((s) => s.setRiskPerTrade);
+  const pullbackEntryEnabled = usePaperTradingStore((s) => s.pullbackEntryEnabled);
   const setPullbackEntryEnabled = usePaperTradingStore((s) => s.setPullbackEntryEnabled);
   const setCandleInterval = usePaperTradingStore((s) => s.setCandleInterval);
   const setIsRunning = usePaperTradingStore((s) => s.setIsRunning);

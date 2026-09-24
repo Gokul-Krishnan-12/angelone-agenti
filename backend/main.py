@@ -89,32 +89,7 @@ def handle_request(req):
             if not api_key:
                 return success({"is_valid": False})
 
-            # Attempt auto-login if full credentials and TOTP secret are stored
-            if client_code and pin and totp_secret:
-                try:
-                    login_res = smart_api_client.login(
-                        api_key, client_code, pin, totp_secret
-                    )
-                    config_manager.save_credentials(
-                        api_key=api_key,
-                        client_code=client_code,
-                        pin=pin,
-                        totp_secret=totp_secret,
-                        jwt_token=login_res.get("jwt_token", ""),
-                        refresh_token=login_res.get("refresh_token", ""),
-                        feed_token=login_res.get("feed_token", ""),
-                    )
-                    ticker_manager.start(
-                        api_key=api_key,
-                        auth_token=login_res.get("jwt_token", ""),
-                        client_code=client_code,
-                        feed_token=login_res.get("feed_token", ""),
-                    )
-                    return success(login_res)
-                except Exception:
-                    pass
-
-            # Fallback to existing session token
+            # 1. Fast path: Check if existing session token is still valid before full TOTP login
             if jwt_token:
                 smart_api_client.init(api_key, client_code or "")
                 smart_api_client.set_session_tokens(
@@ -149,14 +124,44 @@ def handle_request(req):
                         ticker_manager.start(
                             api_key, jwt_token, client_code or "", feed_token
                         )
+                    user_name = client_code
+                    if hasattr(smart_api_client, "user_profile") and smart_api_client.user_profile:
+                        user_name = smart_api_client.user_profile.get("name") or client_code
                     return success(
                         {
                             "is_valid": True,
                             "user_id": client_code,
+                            "user_name": user_name,
                             "jwt_token": jwt_token,
                             "access_token": jwt_token,
+                            "feed_token": feed_token or "",
                         }
                     )
+
+            # 2. Fallback: Attempt headless auto-login if full credentials and TOTP secret are stored
+            if client_code and pin and totp_secret:
+                try:
+                    login_res = smart_api_client.login(
+                        api_key, client_code, pin, totp_secret
+                    )
+                    config_manager.save_credentials(
+                        api_key=api_key,
+                        client_code=client_code,
+                        pin=pin,
+                        totp_secret=totp_secret,
+                        jwt_token=login_res.get("jwt_token", ""),
+                        refresh_token=login_res.get("refresh_token", ""),
+                        feed_token=login_res.get("feed_token", ""),
+                    )
+                    ticker_manager.start(
+                        api_key=api_key,
+                        auth_token=login_res.get("jwt_token", ""),
+                        client_code=client_code,
+                        feed_token=login_res.get("feed_token", ""),
+                    )
+                    return success(login_res)
+                except Exception as e:
+                    logger.warning("Auto-login during check_session failed: %s", e)
 
             return success({"is_valid": False})
 

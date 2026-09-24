@@ -63,9 +63,18 @@ export const useSmartAPI = () => {
     const init = async () => {
       try {
         const authStat = await window.electronAPI?.invoke(IPC.AUTH_STATUS);
-        if (authStat !== undefined) {
-          store.setAuth({ isLoggedIn: authStat === true });
-          store.setConnectionStatus(authStat === true ? 'connected' : 'disconnected');
+        if (authStat !== undefined && authStat !== null) {
+          const isAuthed = typeof authStat === 'object' ? Boolean(authStat.isValid || authStat.is_valid) : Boolean(authStat);
+          const creds = typeof authStat === 'object' && authStat.credentials ? authStat.credentials : undefined;
+          store.setAuth({
+            isLoggedIn: isAuthed,
+            isCheckingAuth: false,
+            ...(creds ? { credentials: creds } : {})
+          });
+          store.setConnectionStatus(isAuthed ? 'connected' : 'disconnected');
+        } else {
+          store.setAuth({ isLoggedIn: false, isCheckingAuth: false });
+          store.setConnectionStatus('disconnected');
         }
         const agentStat = await window.electronAPI?.invoke(IPC.AGENT_STATUS);
         if (agentStat) {
@@ -158,6 +167,7 @@ export const useSmartAPI = () => {
         } catch (_) {}
       } catch (e) {
         console.error('Init Error', e);
+        store.setAuth({ isLoggedIn: false, isCheckingAuth: false });
       }
     };
     init();

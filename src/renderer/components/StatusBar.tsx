@@ -29,8 +29,8 @@ const StatusBar: React.FC = () => {
     <div className="h-8 bg-surface-950 border-t border-surface-800 flex items-center justify-between px-4 text-xs font-mono">
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-profit-light' : 'bg-loss-light'}`} />
-          <span className="text-surface-300 capitalize">{isConnected ? 'connected' : 'disconnected'}</span>
+          <div className={`w-2 h-2 rounded-full ${auth.isCheckingAuth ? 'bg-warning-light animate-pulse' : isConnected ? 'bg-profit-light' : 'bg-loss-light'}`} />
+          <span className="text-surface-300 capitalize">{auth.isCheckingAuth ? 'checking session...' : isConnected ? 'connected' : 'disconnected'}</span>
         </div>
         <div className={marketStatus.isOpen ? 'text-profit-light font-semibold' : marketStatus.reason === 'HOLIDAY' ? 'text-warning-light font-semibold' : 'text-surface-400'}>
           Market: {marketStatus.isOpen ? 'OPEN' : marketStatus.reason === 'HOLIDAY' ? `CLOSED (${marketStatus.holidayName})` : marketStatus.displayText}

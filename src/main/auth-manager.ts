@@ -70,10 +70,24 @@ class AuthManager {
     }
   }
 
-  public async checkSession(): Promise<boolean> {
+  public async checkSession(): Promise<{ isValid: boolean; credentials?: any } | boolean> {
     try {
       const response = await pythonBridge.call('check_session');
-      return !!response?.is_valid;
+      if (response?.is_valid) {
+        return {
+          isValid: true,
+          credentials: {
+            apiKey: '',
+            clientCode: response.user_id,
+            userId: response.user_id,
+            userName: response.user_name || response.user_id,
+            jwtToken: response.jwt_token || response.access_token,
+            accessToken: response.access_token || response.jwt_token,
+            feedToken: response.feed_token,
+          },
+        };
+      }
+      return false;
     } catch (e) {
       return false;
     }

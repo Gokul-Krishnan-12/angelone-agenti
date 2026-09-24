@@ -36,7 +36,7 @@ const App: React.FC = () => {
             <Route path="/guide" element={<SystemGuide />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
-          {!auth.isLoggedIn && <LoginModal />}
+          {!auth.isLoggedIn && !auth.isCheckingAuth && <LoginModal />}
         </main>
         <StatusBar />
       </div>

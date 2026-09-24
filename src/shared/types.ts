@@ -18,6 +18,7 @@ export type KiteCredentials = SmartApiCredentials;
 
 export interface AuthState {
   isLoggedIn: boolean;
+  isCheckingAuth?: boolean;
   credentials: SmartApiCredentials | null;
   loginUrl: string | null;
   error: string | null;
