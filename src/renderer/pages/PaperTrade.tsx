@@ -618,13 +618,19 @@ const PaperTrade: React.FC = () => {
                             ? 'bg-profit-dark/20 text-profit-light border border-profit/30'
                             : o.status === 'STOPLOSS_HIT'
                               ? 'bg-loss-dark/20 text-loss-light border border-loss/30'
-                              : o.status === 'AUTO_SQUARE_OFF'
-                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                                : o.status === 'OPEN'
+                              : o.status === 'BREAKEVEN'
+                                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                : o.status === 'IDLE_TIMEOUT'
                                   ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                  : 'bg-surface-700 text-surface-300'
+                                  : o.status === 'AUTO_SQUARE_OFF'
+                                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                    : o.status === 'OPEN'
+                                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                      : 'bg-surface-700 text-surface-300'
                             }`}>
-                            {o.status.replace(/_/g, ' ')}
+                            {o.status === 'IDLE_TIMEOUT'
+                              ? 'TIME EXIT'
+                              : o.status.replace(/_/g, ' ')}
                           </span>
                         </td>
                         <td className="px-5 py-3 font-mono font-bold text-right">

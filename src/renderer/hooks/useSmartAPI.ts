@@ -5,6 +5,7 @@ import * as IPC from '@shared/ipc-channels';
 import { OrderRequest, SmartApiCredentials } from '@shared/types';
 
 let globalListenersRegistered = false;
+let globalLogsHydrated = false;
 
 export const useSmartAPI = () => {
   const store = useTradingStore();
@@ -45,10 +46,6 @@ export const useSmartAPI = () => {
         const entry = (data && data.message) ? data : (event && event.message ? event : data);
         if (entry) {
           useTradingStore.getState().addLogEntry(entry);
-          if (entry.message) {
-            const lvl = (entry.level || 'INFO').toUpperCase();
-            usePaperTradingStore.getState().addLog(lvl as any, entry.message);
-          }
         }
       });
 
@@ -153,18 +150,15 @@ export const useSmartAPI = () => {
         }
 
         // Retrieve and hydrate existing recent logs from Python backend so autonomous scan entries are always visible
-        try {
-          const recentLogs = await window.electronAPI?.log?.getAll();
-          if (Array.isArray(recentLogs) && recentLogs.length > 0) {
-            store.setActivityLog(recentLogs);
-            for (const l of [...recentLogs].reverse()) {
-              if (l.message) {
-                const lvl = (l.level || 'INFO').toUpperCase();
-                usePaperTradingStore.getState().addLog(lvl as any, l.message);
-              }
+        if (!globalLogsHydrated) {
+          globalLogsHydrated = true;
+          try {
+            const recentLogs = await window.electronAPI?.log?.getAll();
+            if (Array.isArray(recentLogs) && recentLogs.length > 0) {
+              store.setActivityLog(recentLogs);
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
       } catch (e) {
         console.error('Init Error', e);
         store.setAuth({ isLoggedIn: false, isCheckingAuth: false });

@@ -41,7 +41,7 @@ export interface PaperOrder {
   originalQuantity?: number;
   entryPrice: number;
   exitPrice?: number;
-  status: 'OPEN' | 'TARGET_HIT' | 'STOPLOSS_HIT' | 'MANUAL_EXIT' | 'AUTO_SQUARE_OFF';
+  status: 'OPEN' | 'TARGET_HIT' | 'STOPLOSS_HIT' | 'BREAKEVEN' | 'IDLE_TIMEOUT' | 'MANUAL_EXIT' | 'AUTO_SQUARE_OFF';
   strategy: string;
   pnl?: number;
   pnlPercent?: number;
@@ -106,7 +106,7 @@ interface PaperTradingState {
   clearLogs: () => void;
   clearRejectedTrades: () => void;
   syncRunningStatus: () => Promise<void>;
-  addLog: (type: PaperLogEntry['type'], message: string) => void;
+  addLog: (type: PaperLogEntry['type'], message: string, timestamp?: string) => void;
 }
 
 export const isIndianMarketHours = (forNewEntries: boolean = true): boolean => {
@@ -127,6 +127,25 @@ export const isIndianMarketHours = (forNewEntries: boolean = true): boolean => {
   const marketClose = forNewEntries ? (15 * 60) : (15 * 60 + 15);
 
   return timeInMinutes >= marketOpen && timeInMinutes <= marketClose;
+};
+
+export const isUnwantedSandboxLog = (message?: string): boolean => {
+  const msg = String(message || '');
+  return (
+    msg.includes('Multi-Strategy Scan') ||
+    msg.includes('30-Min Scan') ||
+    msg.includes('30-min scan') ||
+    msg.includes('Dynamic Watchlist') ||
+    msg.includes('Execution Timeframe') ||
+    msg.includes('Entry Mode') ||
+    msg.includes('Dispatched Daily Paper Session Performance Report') ||
+    msg.includes('Screener Funnel') ||
+    msg.includes('Top Shortlist Breakdown') ||
+    msg.includes('Scanning shortlisted') ||
+    msg.includes('Manual scan') ||
+    msg.includes('Manual Scan') ||
+    msg.includes('autonomous')
+  );
 };
 
 export const usePaperTradingStore = create<PaperTradingState>()(
@@ -156,22 +175,10 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       setCandleInterval: (interval: '5minute' | '15minute' | string) => {
         const normalized: '5minute' | '15minute' = String(interval).includes('15') ? '15minute' : '5minute';
         set({ candleInterval: normalized });
-        get().addLog(
-          'INFO',
-          normalized === '15minute'
-            ? '⏱️ Execution Timeframe: 15-Minute Candles Active (Institutional Edge, Lower Friction).'
-            : '⚡ Execution Timeframe: 5-Minute Candles Active (High-Frequency Momentum).'
-        );
       },
 
       setPullbackEntryEnabled: (enabled: boolean) => {
         set({ pullbackEntryEnabled: enabled });
-        get().addLog(
-          'INFO',
-          enabled
-            ? '🎯 Entry Mode: Pullback Retest Enabled (Waits for EMA20/VWAP/POC value retests).'
-            : '⚡ Entry Mode: Direct Breakout Entry Enabled (Enters immediately without waiting for pullbacks).'
-        );
       },
 
       setDummyBalance: (amount: number) => {
@@ -235,16 +242,27 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         });
       },
 
-      addLog: (type, message) => {
-        const newEntry: PaperLogEntry = {
-          id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          timestamp: new Date().toISOString(),
-          type,
-          message
-        };
-        set((state) => ({
-          activityLog: [newEntry, ...state.activityLog].slice(0, 100)
-        }));
+      addLog: (type, message, customTimestamp?: string) => {
+        if (!message || isUnwantedSandboxLog(message)) return;
+
+        const timestamp = customTimestamp || new Date().toISOString();
+        set((state) => {
+          // Deduplicate if the exact same message already exists with identical timestamp or within 2 seconds
+          const isDup = state.activityLog.slice(0, 15).some(
+            (l) => l.message === message && (l.timestamp === timestamp || Math.abs(new Date(l.timestamp).getTime() - new Date(timestamp).getTime()) < 2000)
+          );
+          if (isDup) return state;
+
+          const newEntry: PaperLogEntry = {
+            id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            timestamp,
+            type,
+            message
+          };
+          return {
+            activityLog: [newEntry, ...state.activityLog].slice(0, 100)
+          };
+        });
       },
 
       clearLogs: () => set({ activityLog: [] }),
@@ -633,12 +651,12 @@ export const usePaperTradingStore = create<PaperTradingState>()(
               (!isBuy && currentPos.stopLoss < currentPos.entryPrice)
             );
             const isBreakeven = !isIdleStagnant && currentPos.partialBooked && Math.abs(effectivePrice - currentPos.entryPrice) < currentPos.entryPrice * 0.002;
-            const exitStatus: 'TARGET_HIT' | 'STOPLOSS_HIT' | 'AUTO_SQUARE_OFF' = targetHit
+            const exitStatus: PaperOrder['status'] = targetHit
               ? 'TARGET_HIT'
-              : (isIdleStagnant ? 'AUTO_SQUARE_OFF' : 'STOPLOSS_HIT');
+              : (isIdleStagnant ? 'IDLE_TIMEOUT' : (isBreakeven ? 'BREAKEVEN' : 'STOPLOSS_HIT'));
             const exitReasonText = targetHit
               ? 'TARGET'
-              : (isIdleStagnant ? 'IDLE_CIRCUIT_BREAKER (Stagnant > 35m without +0.6R)' : (currentPos.partialBooked ? 'BREAKEVEN' : 'STOPLOSS'));
+              : (isIdleStagnant ? 'TIME_EXIT' : (currentPos.partialBooked ? 'BREAKEVEN' : 'STOPLOSS'));
             
             const remainingPnl = currentPnl;
             const totalTradePnl = (currentPos.partialPnl || 0) + remainingPnl;
@@ -680,7 +698,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
             } else if (isIdleStagnant) {
               logsToAdd.push({
                 type: 'EXIT',
-                message: `⏱️ IDLE CIRCUIT BREAKER: ${currentPos.tradingsymbol} held for ${minsHeld.toFixed(0)}m without reaching +0.6R (${currentR.toFixed(2)}R). Closed at ₹${effectivePrice.toFixed(2)} to free frozen capital. Net P&L: ${totalTradePnl >= 0 ? '+' : ''}₹${totalTradePnl.toFixed(2)}.`
+                message: `⏱️ Time Exit: ${currentPos.tradingsymbol} closed after ${minsHeld.toFixed(0)}m (momentum stalled). Closed at ₹${effectivePrice.toFixed(2)}. Net P&L: ${totalTradePnl >= 0 ? '+' : ''}₹${totalTradePnl.toFixed(2)}.`
               });
             } else {
               logsToAdd.push({
@@ -854,7 +872,6 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         }
 
         set({ lastPaperSummaryDate: todayIst });
-        get().addLog('INFO', `📊 Dispatched Daily Paper Session Performance Report to Telegram (${totalTrades} trades, Net: ₹${netPnl.toFixed(2)}).`);
         return true;
       },
 
@@ -958,9 +975,51 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       clearOrders: () => set({ orders: [] }),
 
       repairOrders: () => {
-        set((state) => ({
-          orders: state.orders.map(sanitizePaperOrder)
-        }));
+        set((state) => {
+          const sanitizedOrders = state.orders.map(sanitizePaperOrder);
+          const logs = (state.activityLog || []).filter((l) => !isUnwantedSandboxLog(l?.message));
+
+          // Ensure clean exit logs exist for completed trades
+          for (const o of sanitizedOrders) {
+            if (o.status !== 'OPEN' && o.exitTime && o.exitPrice) {
+              const hasExitLog = logs.some((l) => l.message?.includes(o.tradingsymbol) && (l.type === 'EXIT' || l.type === 'TARGET' || l.type === 'STOPLOSS'));
+              if (!hasExitLog && o.exitReason) {
+                const isProf = (o.pnl || 0) >= 0;
+                let logType: PaperLogEntry['type'] = 'EXIT';
+                let logMsg = '';
+                if (o.status === 'IDLE_TIMEOUT' || o.exitReason.includes('IDLE_CIRCUIT_BREAKER') || o.exitReason === 'TIME_EXIT') {
+                  logType = 'EXIT';
+                  logMsg = `⏱️ Time Exit: ${o.tradingsymbol} closed at ₹${o.exitPrice.toFixed(2)} (momentum stalled > 35m). Net P&L: ${isProf ? '+' : ''}₹${(o.pnl || 0).toFixed(2)}.`;
+                } else if (o.status === 'TARGET_HIT') {
+                  logType = 'TARGET';
+                  logMsg = `🎯 TARGET HIT: ${o.tradingsymbol} hit ₹${o.exitPrice.toFixed(2)}! Virtual Profit: +₹${(o.pnl || 0).toFixed(2)}`;
+                } else if (o.status === 'STOPLOSS_HIT') {
+                  logType = 'STOPLOSS';
+                  logMsg = `🛑 STOP LOSS HIT: ${o.tradingsymbol} hit ₹${o.exitPrice.toFixed(2)}. Net P&L: ${isProf ? '+' : ''}₹${(o.pnl || 0).toFixed(2)}`;
+                } else if (o.status === 'BREAKEVEN') {
+                  logType = 'STOPLOSS';
+                  logMsg = `🛡 BREAKEVEN EXIT: ${o.tradingsymbol} closed at ₹${o.exitPrice.toFixed(2)} with zero loss. Net P&L: +₹${(o.pnl || 0).toFixed(2)}.`;
+                } else if (o.status === 'AUTO_SQUARE_OFF') {
+                  logType = 'EXIT';
+                  logMsg = `🕒 EOD AUTO SQUARE-OFF (3:15 PM): Closed ${o.tradingsymbol} @ ₹${o.exitPrice.toFixed(2)}. Net P&L: ${isProf ? '+' : ''}₹${(o.pnl || 0).toFixed(2)}.`;
+                }
+                if (logMsg) {
+                  logs.unshift({
+                    id: `repaired-exit-${o.orderId}`,
+                    timestamp: o.exitTime,
+                    type: logType,
+                    message: logMsg
+                  });
+                }
+              }
+            }
+          }
+
+          return {
+            orders: sanitizedOrders,
+            activityLog: logs.slice(0, 100)
+          };
+        });
         get().autoSquareOffIntraday();
       }
     }),
@@ -972,7 +1031,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         positions: state.positions,
         orders: state.orders,
         rejectedTrades: state.rejectedTrades,
-        activityLog: state.activityLog,
+        activityLog: (state.activityLog || []).filter((l) => !isUnwantedSandboxLog(l?.message)),
         maxCapitalPerTrade: state.maxCapitalPerTrade,
         maxDailyTrades: state.maxDailyTrades,
         riskPerTrade: state.riskPerTrade,
@@ -993,6 +1052,9 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           if (Array.isArray(state.orders)) {
             state.orders = state.orders.map(sanitizePaperOrder);
           }
+          if (Array.isArray(state.activityLog)) {
+            state.activityLog = state.activityLog.filter((l) => !isUnwantedSandboxLog(l?.message));
+          }
           if (typeof state.autoSquareOffIntraday === 'function') {
             state.autoSquareOffIntraday();
           }
@@ -1003,6 +1065,21 @@ export const usePaperTradingStore = create<PaperTradingState>()(
 );
 
 export const sanitizePaperOrder = (o: PaperOrder): PaperOrder => {
+  // Retroactively map idle circuit breaker exits to dedicated IDLE_TIMEOUT status
+  if (o.exitReason?.includes('IDLE_CIRCUIT_BREAKER') && (o.status === 'AUTO_SQUARE_OFF' || o.status as string === 'STOPLOSS_HIT')) {
+    return {
+      ...o,
+      status: 'IDLE_TIMEOUT'
+    };
+  }
+
+  // Retroactively map breakeven exits to dedicated BREAKEVEN status
+  if (o.exitReason === 'BREAKEVEN' && (o.status === 'STOPLOSS_HIT' || o.status === 'AUTO_SQUARE_OFF')) {
+    return {
+      ...o,
+      status: 'BREAKEVEN'
+    };
+  }
   // Retroactively repair today's PATANJALI trade if it only recorded the remaining leg PnL (+₹712.40)
   if (o.tradingsymbol === 'PATANJALI' && Math.abs(o.entryPrice - 382.5) < 0.1 && (o.pnl === 712.4 || !o.partialBooked)) {
     return {
