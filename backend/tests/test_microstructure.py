@@ -234,3 +234,74 @@ def test_microstructure_normal_gap_passes():
     )
     assert passed is True
 
+
+def test_microstructure_min_body_ratio_rejection():
+    """Verify that a doji / climax wick with small body ratio (< 35%) is rejected."""
+    # Create candle where body is only 20% of range
+    timestamps = pd.date_range("2026-09-18 09:30:00", periods=25, freq="5min")
+    data = []
+    for _ in range(24):
+        data.append({"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000.0})
+    # Trigger bar with candle range 10.0, body 2.0, upper wick 0.5 (5%), lower wick 7.5 (75%)
+    # open 107.5, close 109.5, high 110.0, low 100.0 -> upper wick = 0.5/10 = 5%, body = 2/10 = 20% < 35%
+    data.append({"open": 107.5, "high": 110.0, "low": 100.0, "close": 109.5, "volume": 2000.0})
+    df = pd.DataFrame(data, index=timestamps)
+
+    passed, reason, metrics = evaluate_microstructure_quality(
+        df,
+        direction="BUY",
+        min_body_ratio=0.35,
+        strategy_family="breakout",
+        current_time=datetime.datetime(2026, 9, 18, 10, 0),
+    )
+    assert passed is False
+    assert "Weak candle body" in reason
+    assert metrics["body_ratio"] < 0.35
+
+
+def test_microstructure_ema_stretch_guard():
+    """Verify that extreme runaway bars stretched > 3.2x ATR from EMA20 are blocked."""
+    timestamps = pd.date_range("2026-09-18 09:30:00", periods=25, freq="5min")
+    data = []
+    # Stable baseline around 100 with ATR ~ 1.0
+    for _ in range(24):
+        data.append({"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0})
+    # Climax vertical spike to 110 (10 points above EMA20, ATR is ~1.5 -> stretch ~ 6.6x ATR)
+    data.append({"open": 100.0, "high": 110.0, "low": 99.5, "close": 110.0, "volume": 3000.0})
+    df = pd.DataFrame(data, index=timestamps)
+
+    passed, reason, metrics = evaluate_microstructure_quality(
+        df,
+        direction="BUY",
+        max_ema_stretch_atr=3.2,
+        strategy_family="breakout",
+        current_time=datetime.datetime(2026, 9, 18, 10, 0),
+    )
+    assert passed is False
+    assert "Breakout over-extended" in reason
+    assert metrics["ema_stretch"] > 3.2
+
+
+def test_microstructure_macro_trend_alignment():
+    """Verify that counter-trend trades against the macro 100 EMA are prohibited."""
+    timestamps = pd.date_range("2026-09-18 09:30:00", periods=70, freq="5min")
+    # Steady downtrend: price drops from 200 down to 150
+    prices = np.linspace(200, 150, 70)
+    data = []
+    for p in prices:
+        data.append({"open": p, "high": p + 0.5, "low": p - 0.5, "close": p, "volume": 1000.0})
+    # Trigger bar tries to BUY at 151 (far below macro EMA ~175)
+    data[-1] = {"open": 150.0, "high": 152.0, "low": 149.5, "close": 151.5, "volume": 2500.0}
+    df = pd.DataFrame(data, index=timestamps)
+
+    passed, reason, metrics = evaluate_microstructure_quality(
+        df,
+        direction="BUY",
+        require_macro_trend_aligned=True,
+        strategy_family="breakout",
+        current_time=datetime.datetime(2026, 9, 18, 10, 0),
+    )
+    assert passed is False
+    assert "Counter-trend BUY prohibited under macro downtrend" in reason
+
+

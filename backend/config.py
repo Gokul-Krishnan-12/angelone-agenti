@@ -1,6 +1,7 @@
 import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 from cryptography.fernet import Fernet
 
@@ -27,9 +28,12 @@ class ConfigManager:
                 "autoSquareOff": True,
                 "squareOffTime": "15:15",
                 "defaultStopLossPercent": 1.2,
-                "defaultTargetPercent": 2.4,  # exact 1:2 R:R against 1.2% stop-loss
                 "positionRevalWeakExitMins": 15,
-                "positionRevalBreakevenMins": 20,  # idle trade circuit breaker stagnation timeout (20 mins)
+                "positionRevalBreakevenMins": 20,
+                "stagnationTimeoutMins5m": 35.0,  # 35 mins (7 bars) for 5m momentum
+                "stagnationTimeoutMins15m": 75.0,  # 75 mins (5 bars) for 15m candle structure
+                "stagnationTimeoutMins": 75.0,  # calibrated to active 15m timeframe
+                "stagnationMinRequiredR": 0.6,
                 # ── Quality filters ──────────────────────────────────
                 # Backtest evidence: 2-family gate → ₹48k net profit; 3-family gate → ₹4k net (same symbols/period)
                 "minConfluenceScore": 2,  # 2 independent families required (choppy regime)
@@ -65,6 +69,9 @@ class ConfigManager:
                 "microstructureMaxWick": 0.25,  # rejection wick <= 25% of candle range
                 "microstructureMinKer": 0.30,  # 20-period local KER >= 0.30 (blocks chop traps)
                 "microstructureMiddayGuard": True,  # enforces RVOL >= 2.2x during 11:30 - 13:15 IST
+                "maxEmaStretchAtr": 3.2,  # blocks breakout chasing when price is > 3.2x ATR away from EMA20
+                "minBodyRatio": 0.35,  # blocks exhaustion climax wicks where body < 35% of candle range
+                "macroTrendFilterEnabled": True,  # blocks counter-trend breakouts against 100 EMA
                 "maxExhaustionGapPct": 1.8,  # blocks breakout/trend chasing on opening gaps >= 1.8%
                 "maxIntradayTargetPercent": 3.2,  # caps intraday target at 3.2% from entry (or 1.8x ATR)
                 "maxDayExpansionPercent": 4.5,  # caps total intraday expansion at 4.5% from day open
@@ -79,9 +86,9 @@ class ConfigManager:
                 "liquidity_grab_reversal": {"enabled": True},  # Reversal structural edge
                 "gap_fill": {"enabled": True},                 # High hit-rate gap fill
                 "opening_range_breakout": {"enabled": True},   # Session open momentum
-                "macd_cross": {"enabled": True},               # Confluence momentum enabler
                 "stoc_rsi": {"enabled": True},                 # Oscillator confirmation
                 # ── DISABLED: net drag strategies identified by walk-forward backtest ─────────
+                "macd_cross": {"enabled": False},              # 58% presence in SL trades; lagging momentum
                 "order_block_fvg": {"enabled": False},          # -₹6,183 drag
                 "psar_trend": {"enabled": False},               # -₹11,654 drag
                 "volume_delta_divergence": {"enabled": False},  # -₹5,206 drag
@@ -100,26 +107,26 @@ class ConfigManager:
                 "vwap_bounce": {"enabled": False},             # 88.9% SL rate, -₹172 P&L
             },
             "watchlist": [
-                "RELIANCE",
-                "TCS",
-                "HDFCBANK",
-                "INFY",
-                "ICICIBANK",
-                "HINDUNILVR",
-                "ITC",
-                "SBIN",
-                "BHARTIARTL",
-                "KOTAKBANK",
-                "LT",
-                "AXISBANK",
-                "ASIANPAINT",
-                "MARUTI",
-                "TITAN",
-                "SUNPHARMA",
-                "BAJFINANCE",
-                "WIPRO",
-                "ULTRACEMCO",
-                "NESTLEIND",
+                "MAZDOCK",
+                "BDL",
+                "BEL",
+                "KEI",
+                "KPITTECH",
+                "GODREJPROP",
+                "VOLTAS",
+                "NATIONALUM",
+                "DIXON",
+                "POLYCAB",
+                "PERSISTENT",
+                "COFORGE",
+                "TRENT",
+                "HAL",
+                "BSE",
+                "MCX",
+                "TATAELXSI",
+                "SUZLON",
+                "POLICYBZR",
+                "M&M",
             ],
             "notifications": {
                 "telegram": {
@@ -359,6 +366,15 @@ class ConfigManager:
                 json.dump(trades, f, indent=4, default=str)
         except Exception:
             pass
+
+    def get(self, key: str, default: Any = None) -> Any:
+        self.load()
+        return self.config.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self.load()
+        self.config[key] = value
+        self.save()
 
 
 config_manager = ConfigManager()

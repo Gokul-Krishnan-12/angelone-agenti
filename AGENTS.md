@@ -76,7 +76,7 @@ This repository is an **agentic intraday algorithmic trading desktop application
 | [backend/risk_manager.py](file:///home/gokul/Desktop/angelone-agenti/backend/risk_manager.py) | Singleton `RiskManager`. Enforces 1R position sizing, daily loss caps (₹800), daily trade count caps (8 trades/day), market hours gating, and ATR trailing SL logic. |
 | [backend/scanner.py](file:///home/gokul/Desktop/angelone-agenti/backend/scanner.py) | Multi-strategy scanner. Coordinates all 26 strategies, groups votes by signal family, applies confluence, trend alignment (50 EMA), regime, and 1:2 R:R geometry gates. |
 | [backend/screener.py](file:///home/gokul/Desktop/angelone-agenti/backend/screener.py) | Dynamic macro universe screener. Evaluates Kaufman Efficiency Ratio (KER $\ge 0.28$), 20-day turnover ($\ge ₹40\text{ Cr}$), ATR% ($\ge 1.5\%$), and morning RVOL ($\ge 1.8$). |
-| [backend/microstructure.py](file:///home/gokul/Desktop/angelone-agenti/backend/microstructure.py) | Dynamic Microstructural Quality Gate. Evaluates trigger candle RVOL ($\ge 1.2\times$), adverse rejection wick ($\le 25\%$), local KER ($\ge 0.30$), and midday lull liquidity surge ($\ge 2.2\times$ between 11:30–13:15 IST) to eliminate false positives across all stocks without brittle static blacklisting. |
+| [backend/microstructure.py](file:///home/gokul/Desktop/angelone-agenti/backend/microstructure.py) | Dynamic Microstructural Quality Gate. Evaluates trigger candle RVOL ($\ge 1.2\times$), adverse rejection wick ($\le 25\%$), candle body dominance ($\ge 35\%$), over-extension stretch ($\le 3.2\times$ ATR from 20 EMA), macro trend alignment (100 EMA), local KER ($\ge 0.30$), and midday lull liquidity surge ($\ge 2.2\times$ between 11:30–13:15 IST) to eliminate false breakout traps across all stocks without brittle static blacklisting. |
 | [backend/market_regime.py](file:///home/gokul/Desktop/angelone-agenti/backend/market_regime.py) | Quantitative market regime classifier (`TRENDING_BULL`, `TRENDING_BEAR`, `CHOPPY_RANGE`, `VOLATILE_EXPANSION`) using ADX, KER, 50 EMA, and Bollinger Band squeeze width. |
 | [backend/market_hours.py](file:///home/gokul/Desktop/angelone-agenti/backend/market_hours.py) | Indian exchange market hours validator (09:15–15:30 IST), intraday cutoff detector (15:00/15:15 IST), and dynamic exchange trading holiday fetcher with disk cache. |
 | [backend/notifier.py](file:///home/gokul/Desktop/angelone-agenti/backend/notifier.py) | Asynchronous Telegram alert dispatcher using thread pool executors for trade exits, partial bookings, and EOD summaries. |
@@ -122,8 +122,8 @@ The core engine is encapsulated in [backend/trading_engine.py](file:///home/goku
    - Cleans up positions manually closed on the Angel One mobile app.
 2. **Slow Loop (Every 60 seconds)**:
    - Scans the market for new entry setups (`scan_and_trade`).
-   - Clock-aligned dynamic re-screening across the F&O universe (`screener_engine.generate_daily_watchlist`): runs strictly on trading weekdays between **09:30 and 14:30 IST** at scheduled 30-minute intervals (**09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00, 13:30, 14:00, 14:30 IST**). Outside this window, scans do not execute. Every 30-minute scan emits strictly a single clean status message in the Activity Log:
-     - `⏱️ 30-Min Scan [HH:MM IST] complete. Next autonomous scan scheduled at: HH:MM IST.`
+   - Clock-aligned dynamic re-screening across the F&O universe (`screener_engine.generate_daily_watchlist`): runs strictly on trading weekdays between **09:30 and 14:30 IST** at scheduled 15-minute intervals (**09:30, 09:45, 10:00, 10:15, 10:30, 10:45, 11:00, 11:15, 11:30, 11:45, 12:00, 12:15, 12:30, 12:45, 13:00, 13:15, 13:30, 13:45, 14:00, 14:15, 14:30 IST**). Outside this window, scans do not execute. Every 15-minute scan emits strictly a single clean status message in the Activity Log:
+     - `⏱️ 15-Min Scan [HH:MM IST] complete. Next autonomous scan scheduled at: HH:MM IST.`
      - If a scheduled re-screen encounters transient network/quote timeouts, the engine automatically reschedules a 5-minute retry backoff (`_screener_retry_due_at = now_ts + 300`) while strictly preserving all active open trades in the dynamic watchlist.
 
    - Re-evaluates open positions for **Thesis Invalidation**.
@@ -181,7 +181,7 @@ Signal Triggered
 Open positions are checked every 60 seconds against current market signals:
 1. **Rule 1 (Strong Opposing Signal)**: If $\ge 2$ opposing signals fire with $0$ supporting signals $\rightarrow$ Immediate thesis exit.
 2. **Rule 2 (Weak Conviction)**: If $0$ supporting signals, position is in loss, and held for $\ge 15$ minutes $\rightarrow$ Immediate exit.
-3. **Rule 3 (Idle Trade Circuit Breaker)**: If held for $\ge 35$ minutes without tagging $+0.6R$ $\rightarrow$ Immediate market exit to eliminate stagnation and capital lockup (synchronized across `watchdog.py`, `trading_engine.py`, and `paper-trading-store.ts`).
+3. **Rule 3 (Idle Trade Circuit Breaker)**: Automatically calibrated to the active execution timeframe—exits if held for $\ge 35$ minutes on 5m candles (7 bars) or $\ge 75$ minutes on 15m candles (5 bars) without tagging $+0.6R$ $\rightarrow$ Immediate market exit to eliminate stagnation and capital lockup (synchronized across `watchdog.py`, `trading_engine.py`, `BacktestEngine`, and `paper-trading-store.ts`).
 4. **Rule 3b (Time Decay)**: If held for $\ge 20$ minutes and in profit $\rightarrow$ Stop-loss is tightened to Breakeven.
 5. **Rule 4 (Thesis Valid)**: If supporting signals $> 0 \rightarrow$ Position held.
 
@@ -228,12 +228,13 @@ Evaluated using ADX(14), +DI/-DI, KER(20), 50 EMA, and Bollinger Band Squeeze wi
 | **`VOLATILE_EXPANSION`** | Outsized candle expansion / transitional volatility | High-conviction structure/volume setups | Aggressive breakouts |
 
 ### 5.3 Macro Universe Screening Pipeline (Top 35 Stocks)
-Candidates from the 180+ F&O universe must pass 5 quantitative gates to be included in the dynamic watchlist:
-1. **Price Floor**: $\text{LTP} \ge ₹150$ (eliminates penny stocks with high bid-ask friction).
-2. **20-Day Average Daily Turnover**: $\ge ₹40\text{ Crore}$ (guarantees institutional liquidity).
-3. **Daily ATR%**: $\ge 1.5\%$ (ensures sufficient intraday expansion range).
-4. **Kaufman Efficiency Ratio (20D)**: $\text{KER} \ge 0.35$ (screens out sideways consolidations and whipsaw chop).
-5. **Morning RVOL (after 09:45 IST)**: $\ge 1.8\times$ average relative volume.
+Candidates from the 180+ F&O universe must pass 6 quantitative gates to be included in the dynamic watchlist:
+1. **Mega-Cap Blacklist Gate**: Strictly excludes top Nifty 50 index heavyweights (`MEGACAP_BLACKLIST`: RELIANCE, TCS, HDFCBANK, INFY, ICICIBANK, HINDUNILVR, ITC, LT, SBIN, KOTAKBANK, AXISBANK, BHARTIARTL, ASIANPAINT, MARUTI, NESTLEIND, ULTRACEMCO, WIPRO, BAJFINANCE, BAJAJFINSV) due to compressed ATR% (< 1.2%), heavy index arbitrage, and algorithmic passive absorption traps.
+2. **Price Floor**: $\text{LTP} \ge ₹150$ (eliminates penny stocks with high bid-ask friction).
+3. **20-Day Average Daily Turnover**: $\ge ₹40\text{ Crore}$ (guarantees institutional liquidity).
+4. **Daily ATR%**: $\ge 1.5\%$ (ensures sufficient intraday expansion range).
+5. **Kaufman Efficiency Ratio (20D)**: $\text{KER} \ge 0.35$ (screens out sideways consolidations and whipsaw chop).
+6. **Morning RVOL (after 09:45 IST)**: $\ge 1.8\times$ average relative volume.
 
 ### 5.4 Resilient Data Fetching & Auto-Reauthentication
 - **HTTP Keep-Alive Connection Pooling**: Configured a persistent `requests.Session` with `HTTPAdapter(pool_connections=25, pool_maxsize=50, max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504]))` and patched `SmartApi.smartConnect.requests.request = self.http_session.request`. This eliminates continuous TCP 3-way handshake and TLS renegotiation churn that previously triggered Angel One WAF socket drops (`RemoteDisconnected`, `Connection aborted`).
@@ -492,15 +493,19 @@ uv run python -m backend.backtest.run_backtest \
 uv run python backend/backtest/run_multi_period.py
 ```
 
-### 11.2 Key CLI Parameters
+### 11.2 Key CLI Parameters & Backtest Lifecycle Gates
 - `--period`: Simulation window (`30d`, `60d`, `6mo`, `1y`).
-- `--interval`: Bar size (`5m`, `15m`, `1h`, `1d`). *(Note: Yahoo Finance caps 5m intraday bars to max 60 calendar days).*
+- `--interval`: Bar size (`5m`, `15m`, `1h`, `1d`). *(Note: Yahoo Finance caps 5m/15m intraday bars to max 60 calendar days).*
 - `--capital`: Trade allocation in INR (default: `40000.0`, reflecting ₹8k margin × 5x MIS leverage).
 - `--confluence`: Minimum strategy family agreement gate (default: `2`).
 - `--min-rr`: Minimum target risk-reward ratio (default: `1.8`).
 - `--trailing-atr`: ATR trailing stop-loss multiplier (default: `2.2` after `+1.5R` cushion).
 - `--partial-booking`: Front-loaded profit booking at `+1.2R` with breakeven + statutory friction ratchet.
+- `--no-pullback-entry`: Disables pullback limit entry (which defaults to ON, anchoring limit orders to nearest EMA20/VWAP/POC value retest levels).
+- **Strict Same-Day 15:15 IST Square-Off**: Prohibits new entries after 15:00 IST and forces immediate square-off at or before 15:15 IST, completely eliminating multi-day holding and overnight gap risk.
+- **Ported Timeframe-Calibrated Idle Circuit Breaker**: Exits stagnant trades at market (`TIME_EXIT`) if held for $\ge 35$ minutes on 5m candles (7 bars) or $\ge 75$ minutes on 15m candles (5 bars) without reaching $+0.6R$, protecting capital while allowing adequate room for 15m breakouts to mature.
 - `--blacklist`: Space-delimited symbols to exclude.
+
 
 ---
 

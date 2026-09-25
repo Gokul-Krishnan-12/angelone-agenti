@@ -162,17 +162,18 @@ class BacktestTrade:
 def _apply_confluence(
     signals: List[Dict],
     direction: str,
-    min_confluence: int = 3,
-    min_confluence_trending: int = 3,  # raised to 3 across all regimes
-    min_rr: float = 2.0,
+    min_confluence: int = 2,
+    min_confluence_trending: int = 2,
+    min_rr: float = 1.8,
     df: Optional[pd.DataFrame] = None,
     trend_aligned: bool = True,
     min_sl_pct: float = 1.0,
-    max_sl_pct: float = 1.8,
+    max_sl_pct: float = 2.4,
     regime_enabled: bool = True,
     regime_min_adx: float = 20.0,
     regime_min_ker: float = 0.35,
     regime_block_choppy: bool = True,
+    pullback_entry_enabled: bool = True,
 ) -> Optional[Dict]:
     dir_signals = [s for s in signals if s.get("direction") == direction]
     if not dir_signals:
@@ -239,6 +240,8 @@ def _apply_confluence(
             except Exception:
                 pass
 
+        strat_id = best.get("_strat_id", "")
+        family = _get_strategy_family(strat_id)
         passed_micro, _, _ = evaluate_microstructure_quality(
             df=df,
             direction=direction,
@@ -246,6 +249,10 @@ def _apply_confluence(
             min_ker=0.30,
             max_wick_ratio=0.25,
             midday_rvol_boost=2.2,
+            max_ema_stretch_atr=3.2,
+            min_body_ratio=0.35,
+            require_macro_trend_aligned=True,
+            strategy_family=family,
             current_time=curr_ts,
         )
         if not passed_micro:
@@ -262,12 +269,13 @@ def _apply_confluence(
             calculate_volatility_buffered_sl,
         )
 
-        pullback_entry = calculate_pullback_limit_entry(
-            df=df, direction=direction, breakout_level=entry_p
-        )
-        if pullback_entry > 0:
-            entry_p = pullback_entry
-            best["entryPrice"] = entry_p
+        if pullback_entry_enabled:
+            pullback_entry = calculate_pullback_limit_entry(
+                df=df, direction=direction, breakout_level=entry_p
+            )
+            if pullback_entry > 0:
+                entry_p = pullback_entry
+                best["entryPrice"] = entry_p
 
         buffered_sl = calculate_volatility_buffered_sl(
             df=df, direction=direction, raw_sl=sl_p, lookback=10, atr_multiplier=0.85
@@ -317,17 +325,17 @@ def _apply_confluence(
 class BacktestEngine:
     def __init__(
         self,
-        min_confluence: int = 3,
+        min_confluence: int = 2,
         min_confluence_trending: int = 2,
-        min_rr: float = 2.0,
-        capital_per_trade: float = 20_000.0,
+        min_rr: float = 1.8,
+        capital_per_trade: float = 40_000.0,
         trailing_sl_multiplier: float = 1.4,
         min_bars: int = 60,
         trail_after_r: float = 1.2,
         trend_aligned: bool = True,
-        min_sl_pct: float = 1.2,
+        min_sl_pct: float = 1.0,
         max_sl_pct: float = 2.4,
-        max_trades_per_day: int = 4,
+        max_trades_per_day: int = 8,
         enforce_friction_guard: bool = True,
         friction_multiple: float = 3.5,
         disabled_strategies: Optional[Set[str]] = None,
@@ -338,6 +346,12 @@ class BacktestEngine:
         partial_booking_enabled: bool = True,
         partial_target_rr: float = 1.2,
         partial_booking_ratio: float = 0.5,
+        pullback_entry_enabled: bool = True,
+        interval: str = "15m",
+        stagnation_timeout_mins: Optional[float] = None,
+        stagnation_min_required_r: float = 0.6,
+        square_off_time: str = "15:15",
+        no_new_trades_after: str = "15:00",
     ):
         self.min_confluence = min_confluence
         self.min_confluence_trending = min_confluence_trending
@@ -359,14 +373,30 @@ class BacktestEngine:
         self.partial_booking_enabled = partial_booking_enabled
         self.partial_target_rr = partial_target_rr
         self.partial_booking_ratio = partial_booking_ratio
+        self.pullback_entry_enabled = pullback_entry_enabled
+        self.interval = interval
+
+        # Calibrate stagnation timeout to timeframe:
+        # 5m candles: 35 minutes (7 bars)
+        # 15m candles: 75 minutes (5 bars) so breakout moves have time to reach 1.2R/2R
+        if stagnation_timeout_mins is not None:
+            self.stagnation_timeout_mins = float(stagnation_timeout_mins)
+        else:
+            self.stagnation_timeout_mins = (
+                75.0 if str(interval).lower() in ("15m", "15minute") else 35.0
+            )
+
+        self.stagnation_min_required_r = stagnation_min_required_r
+        self.square_off_time = square_off_time
+        self.no_new_trades_after = no_new_trades_after
 
         if disabled_strategies is not None:
             self.disabled_strats = set(disabled_strategies)
         else:
             try:
-                from ..config import config_manager
+                from ..config import ConfigManager
 
-                strat_cfg = config_manager.get_strategy_config()
+                strat_cfg = ConfigManager().get_strategy_config()
                 self.disabled_strats = {
                     s_id
                     for s_id, cfg in strat_cfg.items()
@@ -386,11 +416,10 @@ class BacktestEngine:
                     "macd_cross",
                     "ema_crossover",
                     "awesome_oscillator",
-                    "stoc_rsi",
-                    "institutional_absorption",
+                    "cmf_accumulation",
+                    "volume_delta_divergence",
                     "cpr_breakout_reversal",
                     "order_block_fvg",
-                    "opening_range_breakout",
                 }
 
     def _run_strategies(self, df: pd.DataFrame, symbol: str) -> List[Dict]:
@@ -456,12 +485,31 @@ class BacktestEngine:
         if n < self.min_bars + 2:
             return trades
 
+        # Standardize datetimes for same-day 15:15 IST square-off and 35-min idle circuit breaker
+        datetimes = None
+        if "datetime" in df.columns:
+            try:
+                datetimes = pd.to_datetime(df["datetime"])
+            except Exception:
+                pass
+        elif isinstance(df.index, pd.DatetimeIndex):
+            datetimes = pd.to_datetime(df.index)
+
         # Walk forward bar by bar
         i = self.min_bars
         while i < n - 1:
             if in_trade:
                 i += 1
                 continue  # position management handled inside trade loop below
+
+            # Check no new trades after cutoff (15:00 IST)
+            if datetimes is not None and i < len(datetimes):
+                curr_bar_dt = datetimes.iloc[i]
+                if curr_bar_dt.hour > 15 or (
+                    curr_bar_dt.hour == 15 and curr_bar_dt.minute >= 0
+                ):
+                    i += 1
+                    continue
 
             # Run strategies on recent rolling window up to bar i (150 bars is optimal for 50-EMA and TA indicators)
             window = df.iloc[max(0, i - 150) : i].copy()
@@ -484,6 +532,7 @@ class BacktestEngine:
                     regime_min_adx=self.regime_min_adx,
                     regime_min_ker=self.regime_min_ker,
                     regime_block_choppy=self.regime_block_choppy,
+                    pullback_entry_enabled=self.pullback_entry_enabled,
                 )
                 if chosen:
                     break
@@ -493,7 +542,6 @@ class BacktestEngine:
                 continue
 
             # Entry execution (simulating pullback limit fill)
-            entry_bar = i
             next_bar = df.iloc[i + 1]
             next_open = float(next_bar["open"])
             next_low = float(next_bar["low"])
@@ -501,17 +549,31 @@ class BacktestEngine:
             direction = chosen["direction"]
             signal_entry = float(chosen.get("entryPrice", next_open))
 
-            if signal_entry > 0:
+            if self.pullback_entry_enabled:
                 if direction == "BUY":
-                    entry_price = (
-                        signal_entry if next_low <= signal_entry else next_open
-                    )
+                    if next_low <= signal_entry:
+                        entry_price = min(next_open, signal_entry)
+                        entry_bar = i + 1
+                    elif (i + 2 < n) and float(df.iloc[i + 2]["low"]) <= signal_entry:
+                        entry_price = min(float(df.iloc[i + 2]["open"]), signal_entry)
+                        entry_bar = i + 2
+                    else:
+                        # Limit order was not filled within the pullback retest window
+                        i += 1
+                        continue
                 else:
-                    entry_price = (
-                        signal_entry if next_high >= signal_entry else next_open
-                    )
+                    if next_high >= signal_entry:
+                        entry_price = max(next_open, signal_entry)
+                        entry_bar = i + 1
+                    elif (i + 2 < n) and float(df.iloc[i + 2]["high"]) >= signal_entry:
+                        entry_price = max(float(df.iloc[i + 2]["open"]), signal_entry)
+                        entry_bar = i + 2
+                    else:
+                        i += 1
+                        continue
             else:
                 entry_price = next_open
+                entry_bar = i + 1
 
             initial_sl = float(chosen.get("stopLoss", chosen.get("sl", 0)))
             target = float(chosen.get("target", 0))
@@ -543,13 +605,13 @@ class BacktestEngine:
             trade_risk = abs(entry_price - initial_sl)
             qty = max(1, int(self.capital / entry_price))
 
-            # Compute Target 1 (+1.0R) and Target 2 (+2.0R)
+            # Compute Target 1 (+1.2R) and Target 2 (+2.0R)
             if direction == "BUY":
                 target1 = round(entry_price + (trade_risk * self.partial_target_rr), 2)
-                target2 = round(entry_price + (trade_risk * max(self.min_rr, 2.0)), 2)
+                target2 = round(entry_price + (trade_risk * max(self.min_rr, 1.8)), 2)
             else:
                 target1 = round(entry_price - (trade_risk * self.partial_target_rr), 2)
-                target2 = round(entry_price - (trade_risk * max(self.min_rr, 2.0)), 2)
+                target2 = round(entry_price - (trade_risk * max(self.min_rr, 1.8)), 2)
 
             # Pre-trade Friction Guard Check (reject if payoff < 3.5x friction)
             if self.enforce_friction_guard:
@@ -579,7 +641,7 @@ class BacktestEngine:
             )
             leg2_qty = qty - leg1_qty
 
-            j = i + 2  # first management bar
+            j = entry_bar + 1  # first management bar
 
             while j < n:
                 bar = df.iloc[j]
@@ -587,11 +649,37 @@ class BacktestEngine:
                 hi = float(bar["high"])
                 close = float(bar["close"])
 
+                # ── 1. Strict Same-Day 15:15 IST Square-Off ───────────────
+                if (
+                    datetimes is not None
+                    and entry_bar < len(datetimes)
+                    and j < len(datetimes)
+                ):
+                    bar_dt = datetimes.iloc[j]
+                    entry_dt = datetimes.iloc[entry_bar]
+                    # Check if day rolled over
+                    if bar_dt.date() > entry_dt.date():
+                        exit_price = float(bar["open"])
+                        exit_reason = "SQUAREOFF"
+                        break
+                    # Check if 15:15 IST reached
+                    if bar_dt.hour > 15 or (
+                        bar_dt.hour == 15 and bar_dt.minute >= 15
+                    ):
+                        exit_price = close
+                        exit_reason = "SQUAREOFF"
+                        break
+                else:
+                    if (j - entry_bar) >= 25:
+                        exit_price = close
+                        exit_reason = "SQUAREOFF"
+                        break
+
                 # Update ATR periodically (every 10 bars) for trailing SL
-                if (j - i) % 10 == 0:
+                if (j - entry_bar) % 10 == 0:
                     atr = compute_atr(df.iloc[:j]) or atr
 
-                # ── Check Target 1 (+1.2R) for Partial Booking ───────
+                # ── 2. Check Target 1 (+1.2R) for Partial Booking ─────────
                 if self.partial_booking_enabled and not partial_booked and leg1_qty > 0:
                     if direction == "BUY" and hi >= target1:
                         partial_booked = True
@@ -617,7 +705,7 @@ class BacktestEngine:
                                 trade_sl, round(entry_price + 0.4 * trade_risk, 2)
                             )
 
-                # ── Check Exit Conditions for Remaining Runner ────────
+                # ── 3. Check Exit Conditions for Remaining Runner ──────────
                 if direction == "BUY":
                     if hi >= target2:
                         exit_price = target2
@@ -645,6 +733,30 @@ class BacktestEngine:
                             exit_reason = "TRAILING_SL"
                         else:
                             exit_reason = "SL"
+                        break
+
+                # ── 4. Ported Live 35-Minute Idle Circuit Breaker ──────────
+                if (
+                    datetimes is not None
+                    and entry_bar < len(datetimes)
+                    and j < len(datetimes)
+                ):
+                    mins_held = (bar_dt - entry_dt).total_seconds() / 60.0
+                else:
+                    mins_held = (j - entry_bar) * 15.0
+
+                if mins_held >= self.stagnation_timeout_mins:
+                    current_gain = (
+                        (close - entry_price)
+                        if direction == "BUY"
+                        else (entry_price - close)
+                    )
+                    achieved_r = (
+                        (current_gain / trade_risk) if trade_risk > 0 else 0.0
+                    )
+                    if achieved_r < self.stagnation_min_required_r:
+                        exit_price = close
+                        exit_reason = "TIME_EXIT"
                         break
 
                 # Ratchet trailing SL with profit cushion
@@ -698,16 +810,20 @@ class BacktestEngine:
             risk_per_unit = abs(entry_price - initial_sl)
             reward_per_unit = abs(exit_price - entry_price)
             rr_achieved = (
-                round(reward_per_unit / risk_per_unit, 2) if risk_per_unit > 0 else 0.0
+                round(reward_per_unit / risk_per_unit, 2)
+                if risk_per_unit > 0
+                else 0.0
             )
 
-            entry_dt = ""
-            if "datetime" in df.columns:
-                entry_dt = str(df.iloc[entry_bar + 1]["datetime"])
+            entry_dt_str = ""
+            if datetimes is not None and entry_bar < len(datetimes):
+                entry_dt_str = str(datetimes.iloc[entry_bar])
+            elif "datetime" in df.columns:
+                entry_dt_str = str(df.iloc[entry_bar]["datetime"])
             elif isinstance(df.index, pd.DatetimeIndex):
-                entry_dt = str(df.index[entry_bar + 1])
+                entry_dt_str = str(df.index[entry_bar])
             else:
-                entry_dt = f"Bar_{entry_bar + 1:04d}"
+                entry_dt_str = f"Bar_{entry_bar:04d}"
 
             trades.append(
                 BacktestTrade(
@@ -725,12 +841,12 @@ class BacktestEngine:
                     partial_pnl_rs=round(partial_pnl_rs, 2),
                     exit_price=round(exit_price, 2),
                     exit_reason=exit_reason,
-                    bars_held=j - (i + 1),
+                    bars_held=max(1, j - entry_bar),
                     pnl_pct=pnl_pct,
                     pnl_rs=pnl_rs,
                     friction_rs=friction_rs,
                     net_pnl_rs=net_pnl_rs,
-                    entry_time=entry_dt,
+                    entry_time=entry_dt_str,
                     rr_achieved=rr_achieved,
                     confluence_score=chosen.get("confluenceScore", 0),
                     families_voting=chosen.get("familiesVoting", []),

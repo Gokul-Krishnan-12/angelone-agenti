@@ -117,7 +117,7 @@ Top 20 Ranked Stocks ──► Dispatched to Active Trading Watchlist
 
 ### Re-Screening Rhythms
 - **Initial Run**: Runs at application startup.
-- **30-Minute Scheduled Re-Screening**: Re-evaluates universe ranking at **09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00, 13:30, 14:00, 14:30 IST**.
+- **15-Minute Scheduled Re-Screening**: Re-evaluates universe ranking at clock-aligned 15-minute intervals between **09:30 and 14:30 IST** (**09:30, 09:45, 10:00, 10:15, 10:30, 10:45, 11:00, 11:15, 11:30, 11:45, 12:00, 12:15, 12:30, 12:45, 13:00, 13:15, 13:30, 13:45, 14:00, 14:15, 14:30 IST**).
 - **Active Position Preservation**: When re-screening completes, any symbol that currently has an open active trade is strictly retained in the watchlist, while idle slots are rotated into newly emerging trend leaders.
 
 ---

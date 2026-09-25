@@ -316,7 +316,7 @@ const Watchlist: React.FC = () => {
           </h1>
           <p className="text-xs text-surface-400 mt-0.5">
             {activeTab === 'dynamic'
-              ? 'Algorithmic 30-min screener tracking top momentum, KER efficiency & institutional turnover'
+              ? 'Algorithmic 15-min screener tracking top momentum, KER efficiency & institutional turnover'
               : 'Your pinned personal favorites with quick LIMIT entry execution'}
           </p>
         </div>

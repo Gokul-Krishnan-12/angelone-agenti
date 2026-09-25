@@ -32,7 +32,7 @@ class TradingEngine:
         self._instrument_map = {}  # cached symbol -> instrument_token map
         self._last_eod_summary_date = None
         self.dynamic_watchlist = []
-        self.screener_interval = 1800  # 30 min periodic dynamic re-screening
+        self.screener_interval = 900  # 15 min periodic dynamic re-screening
         self._last_screener_time = 0.0
         self._last_screener_date = None
         self._screener_slots_completed = set()
@@ -41,7 +41,7 @@ class TradingEngine:
         self._screener_lock = threading.Lock()
         self._recent_logs: List[Dict[str, Any]] = []
 
-        # Autonomous screener daemon: runs every 30 mins during market hours even if live trade agent is idle
+        # Autonomous screener daemon: runs every 15 mins during market hours even if live trade agent is idle
         self._screener_thread = threading.Thread(
             target=self._run_screener_scheduler, daemon=True
         )
@@ -233,8 +233,10 @@ class TradingEngine:
                     return getattr(self, "dynamic_watchlist", [])
 
             SCREENER_SLOTS = [
-                "09:30", "10:00", "10:30", "11:00", "11:30",
-                "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"
+                "09:30", "09:45", "10:00", "10:15", "10:30", "10:45",
+                "11:00", "11:15", "11:30", "11:45", "12:00", "12:15",
+                "12:30", "12:45", "13:00", "13:15", "13:30", "13:45",
+                "14:00", "14:15", "14:30"
             ]
             screener_due = force
             slot_label = slot_label_override or ""
@@ -270,8 +272,8 @@ class TradingEngine:
                             slot_label = f"{s} IST"
                             break
 
-                    # Fallback for 30-min elapsed interval (or simulated test clocks)
-                    if not screener_due and (now_ts - getattr(self, "_last_screener_time", 0.0)) >= getattr(self, "screener_interval", 1800):
+                    # Fallback for 15-min elapsed interval (or simulated test clocks)
+                    if not screener_due and (now_ts - getattr(self, "_last_screener_time", 0.0)) >= getattr(self, "screener_interval", 900):
                         screener_due = True
                         passed = [s for s in SCREENER_SLOTS if now_time_str >= s]
                         current_due_slot = passed[-1] if passed else "09:30"
@@ -321,7 +323,7 @@ class TradingEngine:
                     next_slot = self.get_next_screener_slot()
                     effective_label = slot_label or f"{current_due_slot or now_time_str} IST"
                     self._push_log(
-                        f"⏱️ 30-Min Scan [{effective_label}] complete. Next autonomous scan scheduled at: {next_slot}.",
+                        f"⏱️ 15-Min Scan [{effective_label}] complete. Next autonomous scan scheduled at: {next_slot}.",
                         level="info",
                     )
                     try:
@@ -343,12 +345,14 @@ class TradingEngine:
         return getattr(self, "dynamic_watchlist", [])
 
     def get_next_screener_slot(self) -> str:
-        """Return the next upcoming 30-minute scan time between 09:30 and 14:30 IST."""
+        """Return the next upcoming 15-minute scan time between 09:30 and 14:30 IST."""
         now_dt = datetime.datetime.now()
         now_time_str = now_dt.strftime("%H:%M")
         SCREENER_SLOTS = [
-            "09:30", "10:00", "10:30", "11:00", "11:30",
-            "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"
+            "09:30", "09:45", "10:00", "10:15", "10:30", "10:45",
+            "11:00", "11:15", "11:30", "11:45", "12:00", "12:15",
+            "12:30", "12:45", "13:00", "13:15", "13:30", "13:45",
+            "14:00", "14:15", "14:30"
         ]
         upcoming = [s for s in SCREENER_SLOTS if s > now_time_str]
         if upcoming:
@@ -517,7 +521,7 @@ class TradingEngine:
 
         next_slot = self.get_next_screener_slot()
         self._push_log(
-            f"⏱️ Next autonomous 30-min scan scheduled at: {next_slot}.",
+            f"⏱️ Next autonomous 15-min scan scheduled at: {next_slot}.",
             level="info",
         )
 
@@ -1379,10 +1383,12 @@ class TradingEngine:
                     self._exit_position(pos, symbol, reason)
                 continue
 
-            # Rule 3: Idle Trade Circuit Breaker (held >= 35 mins without +0.6R)
+            # Rule 3: Idle Trade Circuit Breaker (calibrated: 35 mins for 5m, 75 mins for 15m)
             from .watchdog import watchdog
 
-            stagnation_mins = float(risk_config.get("stagnationTimeoutMins", 35.0))
+            active_interval = str(risk_config.get("candleInterval", "15minute")).lower()
+            default_timeout = 75.0 if "15" in active_interval else 35.0
+            stagnation_mins = float(risk_config.get("stagnationTimeoutMins", default_timeout))
             stagnation_r = float(risk_config.get("stagnationMinRequiredR", 0.6))
             idle_exit, idle_reason = watchdog.check_idle_trade_circuit_breaker(
                 trade=trade,

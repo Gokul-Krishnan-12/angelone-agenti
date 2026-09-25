@@ -597,8 +597,8 @@ const SystemGuide: React.FC = () => {
                 {
                   step: '01',
                   title: 'Watchlist Feed',
-                  desc: 'Screens ~180+ liquid F&O equities dynamically between 09:30–14:30 IST at clock-aligned 30-minute intervals (top 35 stocks) using 20D turnover (≥ ₹40 Cr), price floor (≥ ₹150), ATR% (≥ 1.5%), KER (≥ 0.35), and morning RVOL (≥ 1.8x). Gaps ≥ 1.8% receive exhaustion penalties.',
-                  badge: '30m Dynamic Universe'
+                  desc: 'Screens ~180+ liquid F&O equities dynamically between 09:30–14:30 IST at clock-aligned 15-minute intervals (top 35 stocks) using 20D turnover (≥ ₹40 Cr), price floor (≥ ₹150), ATR% (≥ 1.5%), KER (≥ 0.35), and morning RVOL (≥ 1.8x). Gaps ≥ 1.8% receive exhaustion penalties.',
+                  badge: '15m Dynamic Universe'
                 },
                 {
                   step: '02',

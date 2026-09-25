@@ -91,7 +91,7 @@ def test_trading_engine_periodic_dynamic_rescreening():
     from backend.trading_engine import TradingEngine
 
     engine = TradingEngine()
-    assert engine.screener_interval == 1800  # 30 minutes default
+    assert engine.screener_interval == 900  # 15 minutes default
     # Reset state to ensure clean slate regardless of when the test runs
     engine.dynamic_watchlist = []
     engine._screener_slots_completed = set()
@@ -136,9 +136,9 @@ def test_trading_engine_periodic_dynamic_rescreening():
                                 assert call_count == 1, "Screener should not have re-run yet"
                                 assert mock_scan.called
 
-                                # 3. Simulate 1801 seconds (30 minutes + 1 second) passing:
+                                # 3. Simulate 901 seconds (15 minutes + 1 second) passing:
                                 #    screener SHOULD re-run via the elapsed-interval fallback path
-                                engine._last_screener_time -= 1801
+                                engine._last_screener_time -= 901
                                 mock_scan.reset_mock()
                                 engine.scan_and_trade()
                                 assert call_count == 2, f"Expected 2 screener calls, got {call_count}"
@@ -266,10 +266,10 @@ def test_clock_screener_single_message_logging():
             ):
                 engine.run_clock_screener(force=True, slot_label_override="10:00 IST")
 
-    # Strictly one single log for the 30-min scan
+    # Strictly one single log for the 15-min scan
     assert len(logs_emitted) == 1
     msg, lvl = logs_emitted[0]
-    assert msg.startswith("⏱️ 30-Min Scan [10:00 IST] complete. Next autonomous scan scheduled at:")
+    assert msg.startswith("⏱️ 15-Min Scan [10:00 IST] complete. Next autonomous scan scheduled at:")
     assert lvl == "info"
     # Verify no multi-line funnel or stock breakdown spam
     assert not any("Funnel" in m for m, _ in logs_emitted)

@@ -63,6 +63,9 @@ def evaluate_microstructure_quality(
     max_wick_ratio: float = 0.25,
     midday_rvol_boost: float = 2.2,
     max_exhaustion_gap_pct: float = 1.8,
+    max_ema_stretch_atr: float = 0.0,
+    min_body_ratio: float = 0.0,
+    require_macro_trend_aligned: bool = False,
     strategy_family: str = "",
     current_time: Optional[datetime.datetime] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
@@ -177,6 +180,8 @@ def evaluate_microstructure_quality(
     candle_range = high - low
 
     if candle_range > 0:
+        body = abs(close_p - open_p)
+        body_ratio = body / candle_range
         if direction == "BUY":
             upper_wick = high - max(open_p, close_p)
             wick_ratio = upper_wick / candle_range
@@ -184,6 +189,7 @@ def evaluate_microstructure_quality(
             lower_wick = min(open_p, close_p) - low
             wick_ratio = lower_wick / candle_range
     else:
+        body_ratio = 1.0
         wick_ratio = 0.0
 
     if max_wick_ratio > 0 and wick_ratio > max_wick_ratio:
@@ -193,6 +199,54 @@ def evaluate_microstructure_quality(
             f"High rejection {wick_type} wick ({wick_ratio:.1%} > {max_wick_ratio:.1%})",
             {"rvol": round(rvol, 2), "wick_ratio": round(wick_ratio, 3), "gap_pct": gap_pct},
         )
+
+    # ── 4.5. Weak Body / Doji Climax Guard ─────────────────────────────────
+    if min_body_ratio > 0 and is_exhaustion_candidate and body_ratio < min_body_ratio:
+        return (
+            False,
+            f"Weak candle body / climax wick ({body_ratio:.1%} < {min_body_ratio:.1%})",
+            {"rvol": round(rvol, 2), "body_ratio": round(body_ratio, 3), "wick_ratio": round(wick_ratio, 3)},
+        )
+
+    # ── 4.6. Over-Extension / EMA20 Stretch Guard ─────────────────────────
+    if len(df) >= 20 and max_ema_stretch_atr > 0 and is_exhaustion_candidate:
+        close_series = df["close"].astype(float)
+        ema20 = float(close_series.ewm(span=20, adjust=False).mean().iloc[-1])
+        high_s = df["high"].astype(float)
+        low_s = df["low"].astype(float)
+        tr1 = high_s - low_s
+        tr2 = (high_s - close_series.shift(1)).abs()
+        tr3 = (low_s - close_series.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr14 = float(tr.rolling(14).mean().iloc[-1]) if len(tr) >= 14 else float(tr.mean())
+
+        if atr14 > 0:
+            stretch = abs(close_p - ema20) / atr14
+            if stretch > max_ema_stretch_atr:
+                stretch_dir = "+" if direction == "BUY" else "-"
+                return (
+                    False,
+                    f"Breakout over-extended ({stretch_dir}{stretch:.2f}x ATR > {max_ema_stretch_atr:.1f}x limit from EMA20)",
+                    {"rvol": round(rvol, 2), "ema_stretch": round(stretch, 2), "gap_pct": gap_pct},
+                )
+
+    # ── 4.7. Macro Trend Alignment Guard (100 EMA) ────────────────────────
+    if len(df) >= 60 and require_macro_trend_aligned and is_exhaustion_candidate:
+        close_series = df["close"].astype(float)
+        span_n = min(100, len(close_series))
+        ema_macro = float(close_series.ewm(span=span_n, adjust=False).mean().iloc[-1])
+        if direction == "BUY" and close_p < ema_macro:
+            return (
+                False,
+                f"Counter-trend BUY prohibited under macro downtrend (Price < 100 EMA: {close_p:.2f} < {ema_macro:.2f})",
+                {"rvol": round(rvol, 2), "close": close_p, "ema_macro": round(ema_macro, 2)},
+            )
+        elif direction == "SELL" and close_p > ema_macro:
+            return (
+                False,
+                f"Counter-trend SELL prohibited under macro uptrend (Price > 100 EMA: {close_p:.2f} > {ema_macro:.2f})",
+                {"rvol": round(rvol, 2), "close": close_p, "ema_macro": round(ema_macro, 2)},
+            )
 
     # ── 5. Local Kaufman Efficiency Ratio (KER) ────────────────────────────
     if len(df) >= 15:

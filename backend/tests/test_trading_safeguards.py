@@ -64,6 +64,7 @@ def test_strategy_roster_pruning_defaults():
     assert strats.get("supertrend", {}).get("enabled") is False, "supertrend should remain disabled (whipsaw prone)"
     assert strats.get("williams_r", {}).get("enabled") is False, "williams_r should remain disabled (56.8% SL rate)"
     assert strats.get("adx_momentum", {}).get("enabled") is False, "adx_momentum should remain disabled (62% SL rate)"
+    assert strats.get("macd_cross", {}).get("enabled") is False, "macd_cross should be disabled (58% presence in SL trades)"
 
     # ── Core alpha strategies: proven net-positive across walk-forward backtests ──
     assert strats.get("bollinger_breakout", {}).get("enabled") is True
@@ -74,7 +75,6 @@ def test_strategy_roster_pruning_defaults():
     assert strats.get("liquidity_grab_reversal", {}).get("enabled") is True
     assert strats.get("gap_fill", {}).get("enabled") is True
     assert strats.get("opening_range_breakout", {}).get("enabled") is True
-    assert strats.get("macd_cross", {}).get("enabled") is True
     assert strats.get("stoc_rsi", {}).get("enabled") is True
 
 

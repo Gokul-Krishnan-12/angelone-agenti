@@ -389,6 +389,9 @@ class Scanner:
             max_wick = float(risk_cfg.get("microstructureMaxWick", 0.25))
             midday_boost = 2.2 if risk_cfg.get("microstructureMiddayGuard", True) else min_rvol
             max_gap = float(risk_cfg.get("maxExhaustionGapPct", 1.8))
+            max_stretch = float(risk_cfg.get("maxEmaStretchAtr", 3.2))
+            min_body = float(risk_cfg.get("minBodyRatio", 0.35))
+            macro_trend = bool(risk_cfg.get("macroTrendFilterEnabled", True))
 
             passed_micro, micro_reason, micro_metrics = evaluate_microstructure_quality(
                 df=df,
@@ -398,6 +401,9 @@ class Scanner:
                 max_wick_ratio=max_wick,
                 midday_rvol_boost=midday_boost,
                 max_exhaustion_gap_pct=max_gap,
+                max_ema_stretch_atr=max_stretch,
+                min_body_ratio=min_body,
+                require_macro_trend_aligned=macro_trend,
                 strategy_family=family,
             )
             if not passed_micro:

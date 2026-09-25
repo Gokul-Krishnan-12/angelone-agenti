@@ -15,11 +15,33 @@ from .smartapi_client import smart_api_client
 logger = logging.getLogger(__name__)
 
 
-# ── Dynamic Intraday Universe ───────────────────────────────────────────────
-# Static symbol blacklists are disabled. The system now utilizes the dynamic
-# Microstructural Quality Gate (RVOL >= 1.2x, KER >= 0.30, Rejection Wick <= 25%,
-# Midday Lull Protection) to dynamically reject false-breakout traps on any symbol.
-DEFAULT_BLACKLIST: set[str] = set()
+# ── Nifty 50 Index Mega-Cap Blacklist ──────────────────────────────────────────
+# Excluded from intraday momentum/breakout scanning due to compressed ATR% (< 1.2%),
+# heavy index futures/options arbitrage, and passive institutional liquidity absorption
+# that generates frequent false-breakout whipsaws.
+MEGACAP_BLACKLIST: set[str] = {
+    "RELIANCE",
+    "TCS",
+    "HDFCBANK",
+    "INFY",
+    "ICICIBANK",
+    "HINDUNILVR",
+    "ITC",
+    "LT",
+    "SBIN",
+    "KOTAKBANK",
+    "AXISBANK",
+    "BHARTIARTL",
+    "ASIANPAINT",
+    "MARUTI",
+    "NESTLEIND",
+    "ULTRACEMCO",
+    "WIPRO",
+    "BAJFINANCE",
+    "BAJAJFINSV",
+}
+
+DEFAULT_BLACKLIST: set[str] = set(MEGACAP_BLACKLIST)
 
 
 

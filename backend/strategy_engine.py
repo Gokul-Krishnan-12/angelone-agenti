@@ -15,7 +15,7 @@ from typing import Optional
 
 import pandas as pd
 
-from .strategies.utils import compute_atr, compute_vwap_bands, compute_volume_profile
+from .strategies.utils import compute_atr, compute_volume_profile, compute_vwap_bands
 
 logger = logging.getLogger("strategy_engine")
 
@@ -158,24 +158,31 @@ def calculate_pullback_limit_entry(
         pass
 
     candidates = [
-        v for v in (vwap_price, ema_20, float(breakout_level), *poc_candidates) if v and v > 0
+        v for v in (vwap_price, ema_20, float(breakout_level) if breakout_level else 0, *poc_candidates) if v and v > 0
     ]
     if not candidates:
         return round(curr_close, 2)
 
     if direction == "BUY":
-        # Nearest support below or at the breakout close
-        # Filter candidates <= curr_close to ensure valid pullback
-        valid_supports = [c for c in candidates if c <= curr_close]
-        pullback_val = max(valid_supports) if valid_supports else max(candidates)
-        # Ensure we don't set a limit price above the market close
-        entry_price = min(curr_close, pullback_val)
+        # Nearest support strictly below the breakout close (0.3% - 1.5% pullback)
+        valid_supports = [c for c in candidates if c < curr_close]
+        if valid_supports:
+            pullback_val = max(valid_supports)
+            # Bound pullback between 0.3% and 1.5% below close
+            pullback_val = max(pullback_val, curr_close * 0.985)
+            entry_price = min(curr_close * 0.997, pullback_val)
+        else:
+            entry_price = round(curr_close * 0.996, 2)
     else:
-        # Nearest resistance above or at the breakdown close
-        # Filter candidates >= curr_close to ensure valid pullback
-        valid_resistances = [c for c in candidates if c >= curr_close]
-        pullback_val = min(valid_resistances) if valid_resistances else min(candidates)
-        # Ensure we don't set a limit price below the market close
-        entry_price = max(curr_close, pullback_val)
+        # Nearest resistance strictly above the breakdown close (0.3% - 1.5% pullback)
+        valid_resistances = [c for c in candidates if c > curr_close]
+        if valid_resistances:
+            pullback_val = min(valid_resistances)
+            # Bound pullback between 0.3% and 1.5% above close
+            pullback_val = min(pullback_val, curr_close * 1.015)
+            entry_price = max(curr_close * 1.003, pullback_val)
+        else:
+            entry_price = round(curr_close * 1.004, 2)
 
     return round(entry_price, 2)
+

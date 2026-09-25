@@ -135,6 +135,8 @@ export const isUnwantedSandboxLog = (message?: string): boolean => {
     msg.includes('Multi-Strategy Scan') ||
     msg.includes('30-Min Scan') ||
     msg.includes('30-min scan') ||
+    msg.includes('15-Min Scan') ||
+    msg.includes('15-min scan') ||
     msg.includes('Dynamic Watchlist') ||
     msg.includes('Execution Timeframe') ||
     msg.includes('Entry Mode') ||
@@ -638,12 +640,13 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           // Check Stop Loss condition (Trailing SL or Breakeven SL or Initial SL)
           const slHit = isBuy ? effectivePrice <= currentPos.stopLoss : effectivePrice >= currentPos.stopLoss;
 
-          // ── Idle Trade Circuit Breaker (35 mins without tagging +0.6R) ──
+          // ── Idle Trade Circuit Breaker (calibrated: 35 mins for 5m, 75 mins for 15m without tagging +0.6R) ──
           const entryMs = new Date(currentPos.entryTime).getTime();
           const minsHeld = (Date.now() - entryMs) / 60000;
           const initialRisk = currentPos.initialRisk || Math.abs(currentPos.entryPrice - (currentPos.initialSl || currentPos.stopLoss)) || (currentPos.entryPrice * 0.012);
           const currentR = initialRisk > 0 ? ((isBuy ? effectivePrice - currentPos.entryPrice : currentPos.entryPrice - effectivePrice) / initialRisk) : 0;
-          const isIdleStagnant = minsHeld >= 35 && currentR < 0.6;
+          const idleTimeoutMins = get().candleInterval === '15minute' ? 75 : 35;
+          const isIdleStagnant = minsHeld >= idleTimeoutMins && currentR < 0.6;
 
           if (targetHit || slHit || isIdleStagnant) {
             const isTrailingSl = !targetHit && !isIdleStagnant && (
@@ -989,7 +992,8 @@ export const usePaperTradingStore = create<PaperTradingState>()(
                 let logMsg = '';
                 if (o.status === 'IDLE_TIMEOUT' || o.exitReason.includes('IDLE_CIRCUIT_BREAKER') || o.exitReason === 'TIME_EXIT') {
                   logType = 'EXIT';
-                  logMsg = `⏱️ Time Exit: ${o.tradingsymbol} closed at ₹${o.exitPrice.toFixed(2)} (momentum stalled > 35m). Net P&L: ${isProf ? '+' : ''}₹${(o.pnl || 0).toFixed(2)}.`;
+                  const timeoutMins = get().candleInterval === '15minute' ? 75 : 35;
+                  logMsg = `⏱️ Time Exit: ${o.tradingsymbol} closed at ₹${o.exitPrice.toFixed(2)} (momentum stalled > ${timeoutMins}m). Net P&L: ${isProf ? '+' : ''}₹${(o.pnl || 0).toFixed(2)}.`;
                 } else if (o.status === 'TARGET_HIT') {
                   logType = 'TARGET';
                   logMsg = `🎯 TARGET HIT: ${o.tradingsymbol} hit ₹${o.exitPrice.toFixed(2)}! Virtual Profit: +₹${(o.pnl || 0).toFixed(2)}`;

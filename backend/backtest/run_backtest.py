@@ -51,7 +51,7 @@ NIFTY_50_SUBSET = [
     "NESTLEIND",
 ]
 
-SHORT_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
+SHORT_SYMBOLS = ["MAZDOCK", "BDL", "KEI", "GODREJPROP", "KPITTECH"]
 
 
 try:
@@ -196,8 +196,8 @@ def main():
     )
     parser.add_argument(
         "--period",
-        default="30d",
-        help="Data period: 30d, 60d, 6mo, 1y (default: 30d)",
+        default="60d",
+        help="Data period: 30d, 60d, 6mo, 1y (default: 60d)",
     )
     parser.add_argument(
         "--universe",
@@ -208,8 +208,8 @@ def main():
     parser.add_argument(
         "--top-momentum",
         type=int,
-        default=20,
-        help="Number of top momentum stocks to select (default: 20)",
+        default=25,
+        help="Number of top momentum stocks to select (default: 25)",
     )
     parser.add_argument(
         "--symbols",
@@ -286,6 +286,17 @@ def main():
         "--no-partial-booking",
         action="store_true",
         help="Disable partial booking (let runners ride with trailing SL to target)",
+    )
+    parser.add_argument(
+        "--no-pullback-entry",
+        action="store_true",
+        help="Disable pullback limit entry (use breakout candle open entry)",
+    )
+    parser.add_argument(
+        "--stagnation-mins",
+        type=float,
+        default=None,
+        help="Stagnation timeout in minutes (default: auto 35m for 5m, 75m for 15m)",
     )
     parser.add_argument(
         "--disabled-strategies",
@@ -409,6 +420,9 @@ def main():
         max_trades_per_day=args.max_daily_trades,
         disabled_strategies=args.disabled_strategies,
         partial_booking_enabled=not args.no_partial_booking,
+        pullback_entry_enabled=not args.no_pullback_entry,
+        interval=args.interval,
+        stagnation_timeout_mins=args.stagnation_mins,
     )
     trades = engine.run(symbol_dfs)
     elapsed = time.time() - t0
